@@ -39,9 +39,15 @@ const HOUSE_EDGE_FACTOR = 0.92;
 // cash out instead — they just can't keep climbing.
 const MAX_MULTIPLIER_BEFORE_FORCED_BOMB = 50;
 
-// Maximum chance the very first click can be a bomb, regardless of the
-// underlying mine count or house edge.
+// First-click bomb chance when this game was pre-flagged as "house wins".
+// Lucky games (the ~39% that aren't house-wins) always survive the first
+// click — the mine quietly swaps to a safe tile instead.
 const FIRST_CLICK_BOMB_CAP = 0.4;
+
+// In house-win games, every click after the first has an additional flat
+// chance of being converted into a bomb on the spot, on top of the real
+// pre-placed mine positions.
+const HOUSE_WIN_RIG_PER_CLICK = 0.25;
 
 interface MinesState {
   bet: bigint;
@@ -370,28 +376,39 @@ const command: SlashCommand = {
         // Force a bomb on this tile, even if it was originally safe.
         survive = false;
         if (!state.mineTiles.has(idx)) state.mineTiles.add(idx);
-      } else if (isFirstClick && state.mineTiles.has(idx)) {
-        // Cap first-click bomb chance at FIRST_CLICK_BOMB_CAP. If we'd
-        // otherwise bomb, swap the mine to a random safe tile.
-        if (Math.random() < FIRST_CLICK_BOMB_CAP) {
-          survive = false;
+      } else if (isFirstClick) {
+        if (state.mineTiles.has(idx)) {
+          // Lucky games always survive the first click on a mine; rigged
+          // games still bomb at FIRST_CLICK_BOMB_CAP.
+          if (state.willHouseWin && Math.random() < FIRST_CLICK_BOMB_CAP) {
+            survive = false;
+          } else {
+            state.mineTiles.delete(idx);
+            const safe: number[] = [];
+            for (let i = 0; i < GRID; i++) {
+              if (i !== idx && !state.mineTiles.has(i)) safe.push(i);
+            }
+            if (safe.length > 0) {
+              const swapTo = safe[Math.floor(Math.random() * safe.length)]!;
+              state.mineTiles.add(swapTo);
+            }
+            survive = true;
+          }
         } else {
-          state.mineTiles.delete(idx);
-          const safe: number[] = [];
-          for (let i = 0; i < GRID; i++) {
-            if (i !== idx && !state.mineTiles.has(i)) safe.push(i);
-          }
-          if (safe.length > 0) {
-            const swapTo = safe[Math.floor(Math.random() * safe.length)]!;
-            state.mineTiles.add(swapTo);
-          }
           survive = true;
         }
+      } else if (state.mineTiles.has(idx)) {
+        // Real pre-placed mine.
+        survive = false;
+      } else if (
+        state.willHouseWin &&
+        Math.random() < HOUSE_WIN_RIG_PER_CLICK
+      ) {
+        // Rigged game: secretly convert this safe tile into a mine.
+        state.mineTiles.add(idx);
+        survive = false;
       } else {
-        // Normal play: it's a bomb iff the tile is one of the pre-placed
-        // mines. No per-click house bias here — the house edge lives in
-        // the multiplier curve and the multiplier ceiling.
-        survive = !state.mineTiles.has(idx);
+        survive = true;
       }
 
       if (!survive) {
