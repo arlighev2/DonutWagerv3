@@ -1,10 +1,12 @@
 import {
   EmbedBuilder,
+  PermissionFlagsBits,
   SlashCommandBuilder,
   type ChatInputCommandInteraction,
 } from "discord.js";
 import { getBalanceHistory, getGameHistory } from "../lib/db.js";
 import { formatCoinsShort } from "../lib/format.js";
+import { isOwner, isWithdrawStaff } from "../lib/permissions.js";
 import type { SlashCommand } from "../lib/types.js";
 
 const SOURCE_LABEL: Record<string, string> = {
@@ -29,30 +31,59 @@ function formatDelta(deltaStr: string): string {
 const command: SlashCommand = {
   data: new SlashCommandBuilder()
     .setName("history")
-    .setDescription("View your recent balance changes or game results")
+    .setDescription("Staff: view a user's recent balance changes or game results")
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
     .addSubcommand((sc) =>
       sc
         .setName("balance")
-        .setDescription("Where your coins came from / went (coupons, admin, withdrawals)"),
+        .setDescription("Where the coins came from / went (coupons, admin, withdrawals)")
+        .addUserOption((o) =>
+          o
+            .setName("user")
+            .setDescription("User to inspect (defaults to you)")
+            .setRequired(false),
+        ),
     )
     .addSubcommand((sc) =>
       sc
         .setName("games")
-        .setDescription("Your most recent games and whether you won or lost"),
+        .setDescription("Most recent games and whether they won or lost")
+        .addUserOption((o) =>
+          o
+            .setName("user")
+            .setDescription("User to inspect (defaults to you)")
+            .setRequired(false),
+        ),
     ),
   async execute(interaction: ChatInputCommandInteraction): Promise<void> {
     const sub = interaction.options.getSubcommand();
 
+    if (!isOwner(interaction) && !isWithdrawStaff(interaction)) {
+      await interaction.reply({
+        content: "Staff only.",
+        ephemeral: true,
+      });
+      return;
+    }
+
+    const target =
+      interaction.options.getUser("user", false) ?? interaction.user;
+    const isSelf = target.id === interaction.user.id;
+    const subjectLabel = isSelf ? "" : ` for <@${target.id}>`;
+
     if (sub === "balance") {
-      const events = await getBalanceHistory(interaction.user.id, 15);
+      const events = await getBalanceHistory(target.id, 15);
+      const title = isSelf ? "Balance History" : `Balance History — ${target.tag}`;
       if (events.length === 0) {
         await interaction.reply({
           embeds: [
             new EmbedBuilder()
               .setColor(0x3b82f6)
-              .setTitle("Balance History")
+              .setTitle(title)
               .setDescription(
-                "No non-game balance changes yet. Use `/history games` to see your gambling results.",
+                isSelf
+                  ? "No non-game balance changes yet. Use `/history games` to see gambling results."
+                  : `No non-game balance changes${subjectLabel} yet.`,
               ),
           ],
           ephemeral: true,
@@ -69,7 +100,7 @@ const command: SlashCommand = {
         embeds: [
           new EmbedBuilder()
             .setColor(0x3b82f6)
-            .setTitle("Balance History")
+            .setTitle(title)
             .setDescription(lines.join("\n"))
             .setFooter({
               text: "Coupons, daily, admin actions, withdrawals — last 15 events.",
@@ -81,14 +112,19 @@ const command: SlashCommand = {
     }
 
     if (sub === "games") {
-      const games = await getGameHistory(interaction.user.id, 15);
+      const games = await getGameHistory(target.id, 15);
+      const title = isSelf ? "Game History" : `Game History — ${target.tag}`;
       if (games.length === 0) {
         await interaction.reply({
           embeds: [
             new EmbedBuilder()
               .setColor(0x3b82f6)
-              .setTitle("Game History")
-              .setDescription("You haven't played any games yet."),
+              .setTitle(title)
+              .setDescription(
+                isSelf
+                  ? "You haven't played any games yet."
+                  : `<@${target.id}> hasn't played any games yet.`,
+              ),
           ],
           ephemeral: true,
         });
@@ -106,7 +142,7 @@ const command: SlashCommand = {
         embeds: [
           new EmbedBuilder()
             .setColor(0x3b82f6)
-            .setTitle("Game History")
+            .setTitle(title)
             .setDescription(lines.join("\n"))
             .setFooter({ text: "Last 15 games." }),
         ],
