@@ -37,7 +37,11 @@ const HOUSE_EDGE_FACTOR = 0.92;
 // Hard ceiling: once the player's current multiplier crosses this,
 // the very next tile they click is forced to be a mine. They can still
 // cash out instead — they just can't keep climbing.
-const MAX_MULTIPLIER_BEFORE_FORCED_BOMB = 70;
+const MAX_MULTIPLIER_BEFORE_FORCED_BOMB = 50;
+
+// Maximum chance the very first click can be a bomb, regardless of the
+// underlying mine count or house edge.
+const FIRST_CLICK_BOMB_CAP = 0.4;
 
 interface MinesState {
   bet: bigint;
@@ -244,6 +248,11 @@ const command: SlashCommand = {
       }
     };
 
+    const minePositions = new Set<number>();
+    while (minePositions.size < minesOpt) {
+      minePositions.add(Math.floor(Math.random() * GRID));
+    }
+
     const state: MinesState = {
       bet,
       mines: minesOpt,
@@ -252,7 +261,7 @@ const command: SlashCommand = {
       cashedOut: false,
       timedOut: false,
       willHouseWin: houseShouldWin(bet),
-      mineTiles: new Set(),
+      mineTiles: minePositions,
       safeTiles: new Set(),
     };
 
@@ -347,42 +356,47 @@ const command: SlashCommand = {
       if (!tileMatch) return;
       const idx = parseInt(tileMatch[1]!, 10);
 
-      if (state.revealed.has(idx) || state.mineTiles.has(idx)) {
+      if (state.revealed.has(idx)) {
         await btn.deferUpdate();
         return;
       }
 
-      const remaining = GRID - state.revealed.size - state.mineTiles.size;
-      const baseSurvive =
-        (remaining - (state.mines - state.mineTiles.size)) / remaining;
-      // First-click mercy: only when the user picked 1 mine AND bet < 13M.
-      // Players who choose more mines are gambling on a stacked board on
-      // purpose — no mercy for them.
       const isFirstClick = state.revealed.size === 0;
-      const firstClickMercy =
-        isFirstClick && state.mines === 1 && state.bet < 13_000_000n;
       const currentMult = multiplierFor(state.revealed.size, state.mines);
       const overCeiling = currentMult > MAX_MULTIPLIER_BEFORE_FORCED_BOMB;
-      // If this game was pre-decided as a house win, the player loses on the
-      // very next click. Lets HOUSE_WIN_RATE = 1.0 mean "auto-crash every
-      // game". First-click mercy still saves 1-mine, sub-13M bets.
-      const survive = overCeiling
-        ? false
-        : firstClickMercy
-          ? true
-          : state.willHouseWin
-            ? false
-            : Math.random() < Math.min(0.97, baseSurvive + 0.2);
+
+      let survive: boolean;
+      if (overCeiling) {
+        // Force a bomb on this tile, even if it was originally safe.
+        survive = false;
+        if (!state.mineTiles.has(idx)) state.mineTiles.add(idx);
+      } else if (isFirstClick && state.mineTiles.has(idx)) {
+        // Cap first-click bomb chance at FIRST_CLICK_BOMB_CAP. If we'd
+        // otherwise bomb, swap the mine to a random safe tile.
+        if (Math.random() < FIRST_CLICK_BOMB_CAP) {
+          survive = false;
+        } else {
+          state.mineTiles.delete(idx);
+          const safe: number[] = [];
+          for (let i = 0; i < GRID; i++) {
+            if (i !== idx && !state.mineTiles.has(i)) safe.push(i);
+          }
+          if (safe.length > 0) {
+            const swapTo = safe[Math.floor(Math.random() * safe.length)]!;
+            state.mineTiles.add(swapTo);
+          }
+          survive = true;
+        }
+      } else {
+        // Normal play: it's a bomb iff the tile is one of the pre-placed
+        // mines. No per-click house bias here — the house edge lives in
+        // the multiplier curve and the multiplier ceiling.
+        survive = !state.mineTiles.has(idx);
+      }
 
       if (!survive) {
         state.exploded = true;
-        state.mineTiles.add(idx);
-        let safety = 0;
-        while (state.mineTiles.size < state.mines && safety++ < 200) {
-          const c = Math.floor(Math.random() * GRID);
-          if (!state.revealed.has(c) && !state.mineTiles.has(c))
-            state.mineTiles.add(c);
-        }
+        if (!state.mineTiles.has(idx)) state.mineTiles.add(idx);
         await recordGame({
           discordId: interaction.user.id,
           game: "mines",
