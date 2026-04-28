@@ -98,7 +98,7 @@ const command: SlashCommand = {
           value:
             "1. Confirm here that you're the verified linked player.\n" +
             "2. A staff member will get on DonutSMP and `/pay` you the amount.\n" +
-            "3. Once you receive it, a moderator will run `/admin payout` here to deduct your bot balance.\n" +
+            "3. Once you receive it, a moderator will run `/admin withdraw` here to deduct your bot balance.\n" +
             "4. Once payout is confirmed only **staff** can close this ticket.",
         },
       )
