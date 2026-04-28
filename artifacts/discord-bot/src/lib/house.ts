@@ -9,7 +9,9 @@
  * outcome. Pass the bet (as bigint) so the rate can be tilted automatically.
  */
 
-de
+export const HOUSE_WIN_RATE = 0.57;
+export const BIG_BET_THRESHOLD = 99_000_000n; // > 99m mil
+export const BIG_BET_HOUSE_RATE = 0.63;
 
 /** Effective house win rate for a given bet. */
 export function houseRateFor(bet?: bigint): number {

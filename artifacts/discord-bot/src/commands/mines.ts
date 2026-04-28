@@ -27,10 +27,8 @@ const ROWS = 5;
 const GRID = COLS * ROWS; // 25
 const MAX_MINES = GRID - 1; // 24
 
-// Default mines count when the user doesn't pass one. 12 mines on a 25-tile
-// board gives a 13/25 = 52% chance of survival on the first reveal — close
-// to "50/50" with a slight edge toward keeping the game going.
-const DEFAULT_MINES = 12;
+// Default mines count when the user doesn't pass one.
+const DEFAULT_MINES = 3;
 
 // Display-side house edge applied once on top of the fair multiplier.
 // The bigger swing comes from `houseShouldWin` biasing the survival roll.
@@ -365,12 +363,15 @@ const command: SlashCommand = {
         isFirstClick && state.mines === 1 && state.bet < 13_000_000n;
       const currentMult = multiplierFor(state.revealed.size, state.mines);
       const overCeiling = currentMult > MAX_MULTIPLIER_BEFORE_FORCED_BOMB;
+      // If this game was pre-decided as a house win, the player loses on the
+      // very next click. Lets HOUSE_WIN_RATE = 1.0 mean "auto-crash every
+      // game". First-click mercy still saves 1-mine, sub-13M bets.
       const survive = overCeiling
         ? false
         : firstClickMercy
           ? true
           : state.willHouseWin
-            ? Math.random() < baseSurvive * 0.6
+            ? false
             : Math.random() < Math.min(0.97, baseSurvive + 0.2);
 
       if (!survive) {
