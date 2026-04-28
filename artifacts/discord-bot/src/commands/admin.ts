@@ -8,11 +8,13 @@ import {
 } from "discord.js";
 import {
   adjustBalance,
+  findUserByMinecraftUsername,
   getOrCreateUser,
   recordBalanceEvent,
   resetUserStats,
   setBalance,
   setConfig,
+  setVerified,
 } from "../lib/db.js";
 import { formatCoins, parseAmount } from "../lib/format.js";
 import type { SlashCommand } from "../lib/types.js";
@@ -38,6 +40,7 @@ const SUBS_OWNER_ONLY = new Set([
   "setmodrole",
   "setcategory",
   "config",
+  "forceverify",
 ]);
 const SUBS_WITHDRAW_STAFF = new Set(["withdraw", "help"]);
 
@@ -144,6 +147,25 @@ const command: SlashCommand = {
       sc.setName("config").setDescription("Show current bot config"),
     )
     .addSubcommand((sc) =>
+      sc
+        .setName("forceverify")
+        .setDescription("Force-link a Discord user to a Minecraft username")
+        .addUserOption((o) =>
+          o
+            .setName("user")
+            .setDescription("Discord user to verify")
+            .setRequired(true),
+        )
+        .addStringOption((o) =>
+          o
+            .setName("minecraft")
+            .setDescription("Minecraft username to link")
+            .setRequired(true)
+            .setMinLength(1)
+            .setMaxLength(32),
+        ),
+    )
+    .addSubcommand((sc) =>
       sc.setName("help").setDescription("Show admin commands you have access to"),
     ),
 
@@ -176,6 +198,7 @@ const command: SlashCommand = {
           "`/admin deny user reason` — reject a deposit",
           "`/admin setbalance user amount` — set a user's balance",
           "`/admin resetstats user` — wipe balance + game stats",
+          "`/admin forceverify user minecraft` — force-link a Discord user to a Minecraft name",
           "`/admin setmodrole role` — set the mod role",
           "`/admin setcategory kind category` — set a ticket category",
           "`/admin config` — show current bot config",
@@ -470,6 +493,43 @@ const command: SlashCommand = {
                 value: `<#${WITHDRAW_LOG_CHANNEL_ID}>`,
               },
             ),
+        ],
+        ephemeral: true,
+      });
+      return;
+    }
+
+    if (sub === "forceverify") {
+      const target = interaction.options.getUser("user", true);
+      const mcName = interaction.options.getString("minecraft", true).trim();
+
+      const conflict = await findUserByMinecraftUsername(mcName);
+      if (conflict && conflict.discord_id !== target.id) {
+        await interaction.reply({
+          content: `\`${mcName}\` is already linked to <@${conflict.discord_id}>. Run \`/reset\` on them first.`,
+          ephemeral: true,
+        });
+        return;
+      }
+
+      await getOrCreateUser(target.id);
+      await setVerified(target.id, mcName);
+      await logAdminAction({
+        actorId: interaction.user.id,
+        actorTag: interaction.user.tag,
+        action: "Force Verify",
+        targetId: target.id,
+        detail: `Linked Minecraft \`${mcName}\``,
+      });
+      await interaction.reply({
+        embeds: [
+          new EmbedBuilder()
+            .setColor(0x22c55e)
+            .setTitle("Verification Forced")
+            .setDescription(
+              `<@${target.id}> is now linked to **${mcName}**.`,
+            )
+            .setFooter({ text: `Forced by ${interaction.user.tag}` }),
         ],
         ephemeral: true,
       });
