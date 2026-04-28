@@ -36,6 +36,11 @@ const DEFAULT_MINES = 12;
 // The bigger swing comes from `houseShouldWin` biasing the survival roll.
 const HOUSE_EDGE_FACTOR = 0.92;
 
+// Hard ceiling: once the player's current multiplier crosses this,
+// the very next tile they click is forced to be a mine. They can still
+// cash out instead — they just can't keep climbing.
+const MAX_MULTIPLIER_BEFORE_FORCED_BOMB = 70;
+
 interface MinesState {
   bet: bigint;
   mines: number;
@@ -358,11 +363,15 @@ const command: SlashCommand = {
       const isFirstClick = state.revealed.size === 0;
       const firstClickMercy =
         isFirstClick && state.mines === 1 && state.bet < 13_000_000n;
-      const survive = firstClickMercy
-        ? true
-        : state.willHouseWin
-          ? Math.random() < baseSurvive * 0.6
-          : Math.random() < Math.min(0.97, baseSurvive + 0.2);
+      const currentMult = multiplierFor(state.revealed.size, state.mines);
+      const overCeiling = currentMult > MAX_MULTIPLIER_BEFORE_FORCED_BOMB;
+      const survive = overCeiling
+        ? false
+        : firstClickMercy
+          ? true
+          : state.willHouseWin
+            ? Math.random() < baseSurvive * 0.6
+            : Math.random() < Math.min(0.97, baseSurvive + 0.2);
 
       if (!survive) {
         state.exploded = true;
