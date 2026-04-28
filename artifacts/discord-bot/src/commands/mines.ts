@@ -13,7 +13,7 @@ import {
 import { adjustBalance, getOrCreateUser, recordGame } from "../lib/db.js";
 import { formatCoins } from "../lib/format.js";
 import { antiSpam, requireVerified, resolveBet } from "../lib/guards.js";
-import { houseShouldWin } from "../lib/house.js";
+import { houseRateFor, houseShouldWin } from "../lib/house.js";
 import { logGamble } from "../lib/gamblelog.js";
 import type { SlashCommand } from "../lib/types.js";
 import { endSession, getSession, startSession } from "../games/sessions.js";
@@ -39,15 +39,14 @@ const HOUSE_EDGE_FACTOR = 0.92;
 // cash out instead — they just can't keep climbing.
 const MAX_MULTIPLIER_BEFORE_FORCED_BOMB = 50;
 
-// First-click bomb chance when this game was pre-flagged as "house wins".
-// Lucky games (the ~39% that aren't house-wins) always survive the first
-// click — the mine quietly swaps to a safe tile instead.
-const FIRST_CLICK_BOMB_CAP = 0.4;
-
-// In house-win games, every click after the first has an additional flat
-// chance of being converted into a bomb on the spot, on top of the real
-// pre-placed mine positions.
-const HOUSE_WIN_RIG_PER_CLICK = 0.25;
+// In house-win games, every click (including the first) has this chance
+// of bombing on top of normal positional play. The chance scales with
+// HOUSE_WIN_RATE / BIG_BET_HOUSE_RATE so that 1.0 means "auto-lose every
+// game". Lucky games (the games NOT pre-flagged as house wins) ignore
+// this bias entirely.
+function rigChanceFor(bet: bigint): number {
+  return houseRateFor(bet);
+}
 
 interface MinesState {
   bet: bigint;
@@ -371,6 +370,8 @@ const command: SlashCommand = {
       const currentMult = multiplierFor(state.revealed.size, state.mines);
       const overCeiling = currentMult > MAX_MULTIPLIER_BEFORE_FORCED_BOMB;
 
+      const rig = rigChanceFor(state.bet);
+
       let survive: boolean;
       if (overCeiling) {
         // Force a bomb on this tile, even if it was originally safe.
@@ -379,8 +380,8 @@ const command: SlashCommand = {
       } else if (isFirstClick) {
         if (state.mineTiles.has(idx)) {
           // Lucky games always survive the first click on a mine; rigged
-          // games still bomb at FIRST_CLICK_BOMB_CAP.
-          if (state.willHouseWin && Math.random() < FIRST_CLICK_BOMB_CAP) {
+          // games bomb with probability `rig` (1.0 = auto-lose).
+          if (state.willHouseWin && Math.random() < rig) {
             survive = false;
           } else {
             state.mineTiles.delete(idx);
@@ -394,16 +395,17 @@ const command: SlashCommand = {
             }
             survive = true;
           }
+        } else if (state.willHouseWin && Math.random() < rig) {
+          // Rigged game: even safe first clicks can be flipped to a bomb.
+          state.mineTiles.add(idx);
+          survive = false;
         } else {
           survive = true;
         }
       } else if (state.mineTiles.has(idx)) {
         // Real pre-placed mine.
         survive = false;
-      } else if (
-        state.willHouseWin &&
-        Math.random() < HOUSE_WIN_RIG_PER_CLICK
-      ) {
+      } else if (state.willHouseWin && Math.random() < rig) {
         // Rigged game: secretly convert this safe tile into a mine.
         state.mineTiles.add(idx);
         survive = false;
