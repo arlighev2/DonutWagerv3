@@ -1,0 +1,472 @@
+import pg from "pg";
+
+const { Pool } = pg;
+
+export const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+});
+
+pool.on("error", (err) => {
+  console.error("[db] Unexpected pool error:", err);
+});
+
+export async function initSchema(): Promise<void> {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS bot_users (
+      discord_id VARCHAR(32) PRIMARY KEY,
+      minecraft_username VARCHAR(64),
+      verified BOOLEAN NOT NULL DEFAULT FALSE,
+      balance BIGINT NOT NULL DEFAULT 0,
+      total_wagered BIGINT NOT NULL DEFAULT 0,
+      total_won BIGINT NOT NULL DEFAULT 0,
+      total_lost BIGINT NOT NULL DEFAULT 0,
+      games_played INTEGER NOT NULL DEFAULT 0,
+      games_won INTEGER NOT NULL DEFAULT 0,
+      last_daily TIMESTAMP,
+      last_command_at TIMESTAMP,
+      created_at TIMESTAMP NOT NULL DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS bot_config (
+      key VARCHAR(64) PRIMARY KEY,
+      value TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS game_log (
+      id SERIAL PRIMARY KEY,
+      discord_id VARCHAR(32) NOT NULL,
+      game VARCHAR(32) NOT NULL,
+      bet BIGINT NOT NULL,
+      payout BIGINT NOT NULL,
+      won BOOLEAN NOT NULL,
+      details JSONB,
+      created_at TIMESTAMP NOT NULL DEFAULT NOW()
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_game_log_user ON game_log(discord_id);
+    CREATE INDEX IF NOT EXISTS idx_game_log_created ON game_log(created_at DESC);
+
+    CREATE TABLE IF NOT EXISTS bot_coupons (
+      code VARCHAR(64) PRIMARY KEY,
+      amount BIGINT NOT NULL,
+      max_uses INTEGER NOT NULL,
+      uses_count INTEGER NOT NULL DEFAULT 0,
+      expires_at TIMESTAMP,
+      created_by VARCHAR(32) NOT NULL,
+      created_at TIMESTAMP NOT NULL DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS bot_coupon_redemptions (
+      code VARCHAR(64) NOT NULL REFERENCES bot_coupons(code) ON DELETE CASCADE,
+      discord_id VARCHAR(32) NOT NULL,
+      redeemed_at TIMESTAMP NOT NULL DEFAULT NOW(),
+      PRIMARY KEY (code, discord_id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_coupon_redemptions_user
+      ON bot_coupon_redemptions(discord_id);
+
+    CREATE TABLE IF NOT EXISTS bot_balance_ledger (
+      id BIGSERIAL PRIMARY KEY,
+      discord_id VARCHAR(32) NOT NULL,
+      delta BIGINT NOT NULL,
+      source VARCHAR(32) NOT NULL,
+      detail TEXT,
+      created_at TIMESTAMP NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_balance_ledger_user
+      ON bot_balance_ledger(discord_id, created_at DESC);
+  `);
+}
+
+export interface BotCoupon {
+  code: string;
+  amount: string;
+  max_uses: number;
+  uses_count: number;
+  expires_at: Date | null;
+  created_by: string;
+  created_at: Date;
+}
+
+export async function createCoupon(params: {
+  code: string;
+  amount: bigint;
+  maxUses: number;
+  expiresAt: Date | null;
+  createdBy: string;
+}): Promise<BotCoupon | null> {
+  const { code, amount, maxUses, expiresAt, createdBy } = params;
+  try {
+    const r = await pool.query<BotCoupon>(
+      `INSERT INTO bot_coupons (code, amount, max_uses, expires_at, created_by)
+         VALUES ($1, $2, $3, $4, $5)
+         RETURNING *`,
+      [code, amount.toString(), maxUses, expiresAt, createdBy],
+    );
+    return r.rows[0] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export async function getCoupon(code: string): Promise<BotCoupon | null> {
+  const r = await pool.query<BotCoupon>(
+    `SELECT * FROM bot_coupons WHERE code = $1`,
+    [code],
+  );
+  return r.rows[0] ?? null;
+}
+
+export async function listCoupons(): Promise<BotCoupon[]> {
+  const r = await pool.query<BotCoupon>(
+    `SELECT * FROM bot_coupons ORDER BY created_at DESC LIMIT 25`,
+  );
+  return r.rows;
+}
+
+export async function deleteCoupon(code: string): Promise<boolean> {
+  const r = await pool.query(`DELETE FROM bot_coupons WHERE code = $1`, [code]);
+  return (r.rowCount ?? 0) > 0;
+}
+
+export type RedeemResult =
+  | { ok: true; amount: bigint; newBalance: bigint }
+  | {
+      ok: false;
+      reason:
+        | "not_found"
+        | "expired"
+        | "exhausted"
+        | "already_used"
+        | "error";
+    };
+
+/**
+ * Atomically redeem a coupon for a user. Returns the credited amount on
+ * success or a structured failure reason.
+ */
+export async function redeemCoupon(
+  code: string,
+  discordId: string,
+): Promise<RedeemResult> {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const couponRes = await client.query<BotCoupon>(
+      `SELECT * FROM bot_coupons WHERE code = $1 FOR UPDATE`,
+      [code],
+    );
+    const coupon = couponRes.rows[0];
+    if (!coupon) {
+      await client.query("ROLLBACK");
+      return { ok: false, reason: "not_found" };
+    }
+    if (coupon.expires_at && new Date(coupon.expires_at) < new Date()) {
+      await client.query("ROLLBACK");
+      return { ok: false, reason: "expired" };
+    }
+    if (coupon.uses_count >= coupon.max_uses) {
+      await client.query("ROLLBACK");
+      return { ok: false, reason: "exhausted" };
+    }
+    const already = await client.query(
+      `SELECT 1 FROM bot_coupon_redemptions WHERE code = $1 AND discord_id = $2`,
+      [code, discordId],
+    );
+    if (already.rowCount && already.rowCount > 0) {
+      await client.query("ROLLBACK");
+      return { ok: false, reason: "already_used" };
+    }
+    await client.query(
+      `INSERT INTO bot_users (discord_id) VALUES ($1) ON CONFLICT DO NOTHING`,
+      [discordId],
+    );
+    await client.query(
+      `INSERT INTO bot_coupon_redemptions (code, discord_id) VALUES ($1, $2)`,
+      [code, discordId],
+    );
+    await client.query(
+      `UPDATE bot_coupons SET uses_count = uses_count + 1 WHERE code = $1`,
+      [code],
+    );
+    const balRes = await client.query<{ balance: string }>(
+      `UPDATE bot_users SET balance = balance + $2 WHERE discord_id = $1
+         RETURNING balance`,
+      [discordId, coupon.amount],
+    );
+    await client.query(
+      `INSERT INTO bot_balance_ledger (discord_id, delta, source, detail)
+         VALUES ($1, $2, 'coupon', $3)`,
+      [discordId, coupon.amount, `Code: ${code}`],
+    );
+    await client.query("COMMIT");
+    return {
+      ok: true,
+      amount: BigInt(coupon.amount),
+      newBalance: BigInt(balRes.rows[0]!.balance),
+    };
+  } catch (err) {
+    await client.query("ROLLBACK").catch(() => {});
+    console.error("[db] redeemCoupon failed:", err);
+    return { ok: false, reason: "error" };
+  } finally {
+    client.release();
+  }
+}
+
+export interface BotUser {
+  discord_id: string;
+  minecraft_username: string | null;
+  verified: boolean;
+  balance: string;
+  total_wagered: string;
+  total_won: string;
+  total_lost: string;
+  games_played: number;
+  games_won: number;
+  last_daily: Date | null;
+  last_command_at: Date | null;
+  created_at: Date;
+}
+
+export async function getOrCreateUser(discordId: string): Promise<BotUser> {
+  const existing = await pool.query<BotUser>(
+    `SELECT * FROM bot_users WHERE discord_id = $1`,
+    [discordId],
+  );
+  if (existing.rows.length > 0) return existing.rows[0]!;
+  const inserted = await pool.query<BotUser>(
+    `INSERT INTO bot_users (discord_id) VALUES ($1) RETURNING *`,
+    [discordId],
+  );
+  return inserted.rows[0]!;
+}
+
+export async function getUser(discordId: string): Promise<BotUser | null> {
+  const r = await pool.query<BotUser>(
+    `SELECT * FROM bot_users WHERE discord_id = $1`,
+    [discordId],
+  );
+  return r.rows[0] ?? null;
+}
+
+export async function unlinkUser(discordId: string): Promise<boolean> {
+  const r = await pool.query(
+    `UPDATE bot_users SET verified = FALSE, minecraft_username = NULL
+       WHERE discord_id = $1`,
+    [discordId],
+  );
+  return (r.rowCount ?? 0) > 0;
+}
+
+/**
+ * Wipe a user's economy: balance + win/loss tallies + game count + last_daily.
+ * Keeps verification + minecraft_username intact (use unlinkUser for that).
+ */
+export async function resetUserStats(discordId: string): Promise<boolean> {
+  const r = await pool.query(
+    `UPDATE bot_users SET
+       balance = 0,
+       total_wagered = 0,
+       total_won = 0,
+       total_lost = 0,
+       games_played = 0,
+       games_won = 0,
+       last_daily = NULL
+     WHERE discord_id = $1`,
+    [discordId],
+  );
+  return (r.rowCount ?? 0) > 0;
+}
+
+/** Find an existing verified user by their case-insensitive Minecraft username. */
+export async function findUserByMinecraftUsername(
+  minecraftUsername: string,
+): Promise<BotUser | null> {
+  const r = await pool.query<BotUser>(
+    `SELECT * FROM bot_users
+       WHERE LOWER(minecraft_username) = LOWER($1) AND verified = TRUE
+       LIMIT 1`,
+    [minecraftUsername],
+  );
+  return r.rows[0] ?? null;
+}
+
+export async function setVerified(
+  discordId: string,
+  minecraftUsername: string,
+): Promise<void> {
+  await pool.query(
+    `UPDATE bot_users SET verified = TRUE, minecraft_username = $2 WHERE discord_id = $1`,
+    [discordId, minecraftUsername],
+  );
+}
+
+export async function adjustBalance(
+  discordId: string,
+  delta: bigint,
+): Promise<bigint> {
+  const r = await pool.query<{ balance: string }>(
+    `UPDATE bot_users SET balance = balance + $2 WHERE discord_id = $1 RETURNING balance`,
+    [discordId, delta.toString()],
+  );
+  return BigInt(r.rows[0]!.balance);
+}
+
+export async function setBalance(
+  discordId: string,
+  newBalance: bigint,
+): Promise<void> {
+  await pool.query(`UPDATE bot_users SET balance = $2 WHERE discord_id = $1`, [
+    discordId,
+    newBalance.toString(),
+  ]);
+}
+
+export async function recordGame(params: {
+  discordId: string;
+  game: string;
+  bet: bigint;
+  payout: bigint;
+  won: boolean;
+  details?: unknown;
+}): Promise<void> {
+  const { discordId, game, bet, payout, won, details } = params;
+  await pool.query(
+    `INSERT INTO game_log (discord_id, game, bet, payout, won, details) VALUES ($1, $2, $3, $4, $5, $6)`,
+    [discordId, game, bet.toString(), payout.toString(), won, details ?? null],
+  );
+
+  const wonAmount = won ? payout - bet : 0n;
+  const lostAmount = won ? 0n : bet;
+
+  await pool.query(
+    `UPDATE bot_users
+       SET total_wagered = total_wagered + $2,
+           total_won = total_won + $3,
+           total_lost = total_lost + $4,
+           games_played = games_played + 1,
+           games_won = games_won + $5,
+           last_command_at = NOW()
+     WHERE discord_id = $1`,
+    [
+      discordId,
+      bet.toString(),
+      wonAmount.toString(),
+      lostAmount.toString(),
+      won ? 1 : 0,
+    ],
+  );
+}
+
+export type BalanceSource =
+  | "coupon"
+  | "daily"
+  | "admin"
+  | "withdraw"
+  | "irlwithdraw";
+
+export async function recordBalanceEvent(params: {
+  discordId: string;
+  delta: bigint;
+  source: BalanceSource;
+  detail?: string;
+}): Promise<void> {
+  await pool.query(
+    `INSERT INTO bot_balance_ledger (discord_id, delta, source, detail)
+       VALUES ($1, $2, $3, $4)`,
+    [
+      params.discordId,
+      params.delta.toString(),
+      params.source,
+      params.detail ?? null,
+    ],
+  );
+}
+
+export interface BalanceEvent {
+  id: string;
+  delta: string;
+  source: string;
+  detail: string | null;
+  created_at: Date;
+}
+
+export async function getBalanceHistory(
+  discordId: string,
+  limit = 25,
+): Promise<BalanceEvent[]> {
+  const r = await pool.query<BalanceEvent>(
+    `SELECT id::text AS id, delta::text AS delta, source, detail, created_at
+       FROM bot_balance_ledger
+       WHERE discord_id = $1
+       ORDER BY created_at DESC
+       LIMIT $2`,
+    [discordId, limit],
+  );
+  return r.rows;
+}
+
+export interface GameEvent {
+  id: number;
+  game: string;
+  bet: string;
+  payout: string;
+  won: boolean;
+  details: unknown;
+  created_at: Date;
+}
+
+export async function getGameHistory(
+  discordId: string,
+  limit = 25,
+): Promise<GameEvent[]> {
+  const r = await pool.query<GameEvent>(
+    `SELECT id, game, bet::text AS bet, payout::text AS payout, won, details, created_at
+       FROM game_log
+       WHERE discord_id = $1
+       ORDER BY created_at DESC
+       LIMIT $2`,
+    [discordId, limit],
+  );
+  return r.rows;
+}
+
+export async function setLastDaily(discordId: string): Promise<void> {
+  await pool.query(
+    `UPDATE bot_users SET last_daily = NOW() WHERE discord_id = $1`,
+    [discordId],
+  );
+}
+
+export async function getLeaderboard(
+  metric: "balance" | "total_won" | "games_won",
+  limit = 10,
+): Promise<Array<{ discord_id: string; minecraft_username: string | null; value: string }>> {
+  const r = await pool.query(
+    `SELECT discord_id, minecraft_username, ${metric}::text AS value
+       FROM bot_users
+       WHERE verified = TRUE
+       ORDER BY ${metric} DESC
+       LIMIT $1`,
+    [limit],
+  );
+  return r.rows;
+}
+
+export async function getConfig(key: string): Promise<string | null> {
+  const r = await pool.query<{ value: string }>(
+    `SELECT value FROM bot_config WHERE key = $1`,
+    [key],
+  );
+  return r.rows[0]?.value ?? null;
+}
+
+export async function setConfig(key: string, value: string): Promise<void> {
+  await pool.query(
+    `INSERT INTO bot_config (key, value) VALUES ($1, $2)
+     ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+    [key, value],
+  );
+}

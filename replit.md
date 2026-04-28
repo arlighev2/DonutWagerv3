@@ -2,7 +2,8 @@
 
 ## Overview
 
-pnpm workspace monorepo using TypeScript. Each package manages its own dependencies.
+pnpm workspace monorepo using TypeScript. Houses a Discord casino/gambling bot
+plus the standard API server scaffold.
 
 ## Stack
 
@@ -10,18 +11,37 @@ pnpm workspace monorepo using TypeScript. Each package manages its own dependenc
 - **Node.js version**: 24
 - **Package manager**: pnpm
 - **TypeScript version**: 5.9
-- **API framework**: Express 5
-- **Database**: PostgreSQL + Drizzle ORM
+- **Database**: PostgreSQL (Replit-managed) via `pg`
+- **Discord bot**: discord.js v14 (`artifacts/discord-bot/`)
+- **API framework**: Express 5 (`artifacts/api-server/`)
 - **Validation**: Zod (`zod/v4`), `drizzle-zod`
-- **API codegen**: Orval (from OpenAPI spec)
-- **Build**: esbuild (CJS bundle)
+
+## Discord Bot (`artifacts/discord-bot`)
+
+Long-running Node.js process registered as the **Discord Bot** workflow.
+Uses two secrets: `DISCORD_BOT_TOKEN`, `DISCORD_CLIENT_ID`.
+
+### Commands
+- Account: `/verify`, `/balance`, `/daily`, `/leaderboard`
+- Banking (creates private staff tickets): `/deposit`, `/withdraw`, `/pay`, `/close`
+- Games: `/coinflip`, `/roulette`, `/blackjack`, `/mines`, `/towers`
+- Moderator: `/admin approve|deny|payout|setbalance|setmodrole|config`
+- Help: `/help`
+
+### House edge
+
+All games consult `src/lib/house.ts`. The single tunable is `HOUSE_WIN_RATE`
+(currently `0.65`). Each round calls `houseShouldWin()` which biases the random
+outcome generator so the house wins ~65% of bets long-term.
+
+### Database tables (auto-created on boot)
+
+- `bot_users` — discord_id, minecraft_username, verified, balance, stats
+- `bot_config` — key/value config (mod role, ticket category)
+- `game_log` — every bet logged for analytics
 
 ## Key Commands
 
 - `pnpm run typecheck` — full typecheck across all packages
-- `pnpm run build` — typecheck + build all packages
-- `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from OpenAPI spec
-- `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
-- `pnpm --filter @workspace/api-server run dev` — run API server locally
-
-See the `pnpm-workspace` skill for workspace structure, TypeScript setup, and package details.
+- `pnpm --filter @workspace/discord-bot run start` — run the bot locally
+- `pnpm --filter @workspace/api-server run dev` — run the API server locally

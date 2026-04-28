@@ -1,0 +1,261 @@
+import {
+  Client,
+  EmbedBuilder,
+  Events,
+  GatewayIntentBits,
+  REST,
+  Routes,
+  type ButtonInteraction,
+  type Interaction,
+} from "discord.js";
+import { commandMap, commands } from "./commands/index.js";
+import { createHash } from "node:crypto";
+import {
+  findUserByMinecraftUsername,
+  getConfig,
+  getOrCreateUser,
+  initSchema,
+  setConfig,
+  setVerified,
+} from "./lib/db.js";
+import { setLogClient } from "./lib/gamblelog.js";
+import { isMod } from "./lib/permissions.js";
+
+const TOKEN = process.env.DISCORD_BOT_TOKEN;
+const CLIENT_ID = process.env.DISCORD_CLIENT_ID;
+
+if (!TOKEN || !CLIENT_ID) {
+  console.error(
+    "Missing DISCORD_BOT_TOKEN or DISCORD_CLIENT_ID environment variable.",
+  );
+  process.exit(1);
+}
+
+// Bumped key (was `registered_commands_hash`) so we force-register once after
+// switching from global → guild-scoped commands.
+const COMMAND_HASH_KEY = "registered_guild_commands_hash";
+
+async function registerGuildCommands(client: Client<true>): Promise<void> {
+  const body = commands.map((c) => c.data.toJSON());
+  const hash = createHash("sha256")
+    .update(JSON.stringify(body))
+    .digest("hex");
+
+  const lastHash = await getConfig(COMMAND_HASH_KEY);
+  if (lastHash === hash && process.env.FORCE_REGISTER !== "1") {
+    console.log(
+      `[bot] Command spec unchanged (${body.length} commands) — skipping registration.`,
+    );
+    return;
+  }
+
+  const rest = new REST({ version: "10" }).setToken(TOKEN!);
+  const guilds = client.guilds.cache;
+  if (guilds.size === 0) {
+    console.warn("[bot] No guilds in cache — nothing to register.");
+    return;
+  }
+  console.log(
+    `[bot] Registering ${body.length} slash commands to ${guilds.size} guild(s)…`,
+  );
+  let okCount = 0;
+  for (const guild of guilds.values()) {
+    try {
+      await rest.put(
+        Routes.applicationGuildCommands(CLIENT_ID!, guild.id),
+        { body },
+      );
+      console.log(`[bot] ✓ Registered for "${guild.name}" (${guild.id})`);
+      okCount++;
+    } catch (err) {
+      console.error(
+        `[bot] ✗ Failed to register for guild ${guild.id}:`,
+        err,
+      );
+    }
+  }
+  if (okCount > 0) {
+    await setConfig(COMMAND_HASH_KEY, hash);
+    console.log(`[bot] Done — registered to ${okCount}/${guilds.size} guild(s).`);
+  }
+}
+
+async function memberIsMod(
+  interaction: ButtonInteraction,
+): Promise<boolean> {
+  return isMod(interaction);
+}
+
+async function handleVerifyButton(
+  interaction: ButtonInteraction,
+): Promise<void> {
+  const parts = interaction.customId.split(":");
+  // verify:approve:<discordId>:<minecraftName>  or  verify:deny:<discordId>
+  const action = parts[1];
+  const targetId = parts[2];
+  const mcName = parts[3];
+  if (!action || !targetId) return;
+
+  if (!(await memberIsMod(interaction))) {
+    await interaction.reply({
+      content: "Only staff can review verifications.",
+      ephemeral: true,
+    });
+    return;
+  }
+
+  if (action === "approve") {
+    if (!mcName) {
+      await interaction.reply({
+        content: "Missing Minecraft name on this button.",
+        ephemeral: true,
+      });
+      return;
+    }
+    // Defensive: another user may have linked this MC name in the meantime.
+    const conflict = await findUserByMinecraftUsername(mcName);
+    if (conflict && conflict.discord_id !== targetId) {
+      await interaction.reply({
+        content: `Cannot approve — \`${mcName}\` is already linked to <@${conflict.discord_id}>.`,
+        ephemeral: true,
+      });
+      return;
+    }
+    await getOrCreateUser(targetId);
+    await setVerified(targetId, mcName);
+    await interaction.update({
+      embeds: [
+        EmbedBuilder.from(interaction.message.embeds[0]!)
+          .setColor(0x22c55e)
+          .setTitle("✅ Verification Approved")
+          .setFooter({
+            text: `Approved by ${interaction.user.tag}`,
+          }),
+      ],
+      components: [],
+    });
+    const channel = interaction.channel;
+    try {
+      if (channel && "send" in channel) {
+        await channel.send(
+          `<@${targetId}> you've been verified. Use \`/balance\`, claim \`/daily\`. This ticket will close automatically in 10 seconds.`,
+        );
+      }
+    } catch {
+      /* ignore */
+    }
+
+    // Auto-close the ticket 10 seconds after approval.
+    if (
+      channel &&
+      "delete" in channel &&
+      "name" in channel &&
+      typeof channel.name === "string" &&
+      channel.name.startsWith("verify-")
+    ) {
+      const ticketChannel = channel;
+      setTimeout(() => {
+        void (async () => {
+          try {
+            await ticketChannel.delete("Verification approved — auto-close");
+          } catch {
+            /* channel already deleted or no perms */
+          }
+        })();
+      }, 10_000);
+    }
+  } else if (action === "deny") {
+    await interaction.update({
+      embeds: [
+        EmbedBuilder.from(interaction.message.embeds[0]!)
+          .setColor(0xef4444)
+          .setTitle("❌ Verification Denied")
+          .setFooter({ text: `Denied by ${interaction.user.tag}` }),
+      ],
+      components: [],
+    });
+    try {
+      const channel = interaction.channel;
+      if (channel && "send" in channel) {
+        await channel.send(
+          `<@${targetId}> your verification was denied. Please re-check your Minecraft username and try \`/verify\` again, or contact a moderator for help.`,
+        );
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+async function main(): Promise<void> {
+  console.log("[bot] Initializing database schema…");
+  await initSchema();
+
+  const client = new Client({
+    intents: [GatewayIntentBits.Guilds],
+  });
+  setLogClient(client);
+
+  client.once(Events.ClientReady, (c) => {
+    console.log(`[bot] Logged in as ${c.user.tag}`);
+    // Register commands per-guild (instant, separate rate-limit pool from
+    // global commands which are slow + heavily throttled). Runs in the
+    // background so a slow Discord call doesn't break interaction handling.
+    void registerGuildCommands(c).catch((err) => {
+      console.error("[bot] Guild command registration failed:", err);
+    });
+  });
+
+  // Auto-register when the bot is added to a new guild later.
+  client.on(Events.GuildCreate, (guild) => {
+    console.log(`[bot] Joined new guild ${guild.name} (${guild.id}) — registering commands.`);
+    if (client.isReady()) {
+      void registerGuildCommands(client).catch((err) => {
+        console.error("[bot] Re-register on guildCreate failed:", err);
+      });
+    }
+  });
+
+  client.on(Events.InteractionCreate, async (interaction: Interaction) => {
+    try {
+      if (interaction.isChatInputCommand()) {
+        const cmd = commandMap.get(interaction.commandName);
+        if (!cmd) return;
+        await cmd.execute(interaction);
+        return;
+      }
+      if (interaction.isButton()) {
+        if (interaction.customId.startsWith("verify:")) {
+          await handleVerifyButton(interaction);
+          return;
+        }
+        // Other button collectors (mines, blackjack, towers) are handled in
+        // their own per-message createMessageComponentCollector.
+        return;
+      }
+    } catch (err) {
+      console.error("[bot] Interaction failed:", err);
+      if (!interaction.isRepliable()) return;
+      const reply = {
+        content: "Something went wrong handling that.",
+        ephemeral: true,
+      };
+      try {
+        if (interaction.deferred || interaction.replied) {
+          await interaction.followUp(reply);
+        } else {
+          await interaction.reply(reply);
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+  });
+
+  await client.login(TOKEN);
+}
+
+main().catch((err) => {
+  console.error("[bot] Fatal error:", err);
+  process.exit(1);
+});

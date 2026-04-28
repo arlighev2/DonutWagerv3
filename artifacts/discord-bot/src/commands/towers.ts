@@ -1,0 +1,448 @@
+import {
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+  ComponentType,
+  EmbedBuilder,
+  SlashCommandBuilder,
+  type ButtonInteraction,
+  type ChatInputCommandInteraction,
+} from "discord.js";
+import { adjustBalance, getOrCreateUser, recordGame } from "../lib/db.js";
+import { formatCoins } from "../lib/format.js";
+import { antiSpam, requireVerified, resolveBet } from "../lib/guards.js";
+import { houseShouldWin } from "../lib/house.js";
+import { logGamble } from "../lib/gamblelog.js";
+import type { SlashCommand } from "../lib/types.js";
+import { endSession, getSession, startSession } from "../games/sessions.js";
+
+// 4 levels x N columns. 4 button rows + 1 cashout row = 5 (Discord max).
+const ROWS = 4;
+
+// Display-side house edge applied once on top of the fair multiplier.
+// The bigger swing comes from `houseShouldWin` biasing the survival roll.
+const HOUSE_EDGE_FACTOR = 0.95;
+
+type Difficulty = "easy" | "medium" | "hard";
+
+// Each row has exactly 1 bomb. `cols` = tiles per row (so cols-1 are safe).
+// Easy = 1-of-3 (67% per row, smallest reward).
+// Medium = 1-of-2 (50/50, the default).
+// Hard = 1-of-4 (25% per row, biggest reward).
+const DIFFICULTY_COLS: Record<Difficulty, number> = {
+  easy: 3,
+  medium: 2,
+  hard: 4,
+};
+
+interface TowersState {
+  bet: bigint;
+  cols: number;
+  difficulty: Difficulty;
+  currentRow: number;
+  failed: boolean;
+  failedRow: number; // -1 if not failed
+  cashedOut: boolean;
+  picks: number[];
+  bombs: Map<number, number[]>;
+  willHouseWin: boolean;
+}
+
+function multiplierFor(level: number, cols: number): number {
+  if (level <= 0) return 1;
+  // Fair payout per cleared row is `cols` (1-of-cols safe). Apply the display
+  // edge once at the end so it doesn't compound row by row.
+  return Math.pow(cols, level) * HOUSE_EDGE_FACTOR;
+}
+
+function survivalThreshold(cols: number, willHouseWin: boolean): number {
+  const fair = 1 / cols;
+  if (willHouseWin) {
+    // House-favored round: survival ~55% of fair odds.
+    return fair * 0.55;
+  }
+  // User-favored round: bumped above fair odds, capped so it can still bust.
+  return Math.min(0.9, fair + 0.15);
+}
+
+function buildRows(state: TowersState, gameOver: boolean) {
+  const rows: ActionRowBuilder<ButtonBuilder>[] = [];
+  // Top of tower at top of message, bottom row is "level 1".
+  for (let r = ROWS - 1; r >= 0; r--) {
+    const row = new ActionRowBuilder<ButtonBuilder>();
+    const isCurrent = r === state.currentRow && !gameOver && !state.failed;
+    const isCleared = r < state.currentRow;
+    const isFailedRow = state.failed && r === state.failedRow;
+    const bombCols = state.bombs.get(r) ?? [];
+    const userPick = state.picks[r];
+
+    for (let c = 0; c < state.cols; c++) {
+      const btn = new ButtonBuilder().setCustomId(`towers:pick:${r}:${c}`);
+      const isBomb = bombCols.includes(c);
+      const isUserTile = userPick === c;
+
+      if (isCleared) {
+        // Row was cleared — user's pick was safe, the rest were bombs.
+        if (isUserTile) {
+          btn.setLabel("💎").setStyle(ButtonStyle.Success).setDisabled(true);
+        } else {
+          btn.setLabel("💣").setStyle(ButtonStyle.Danger).setDisabled(true);
+        }
+      } else if (isFailedRow) {
+        // The row they died on — show their bomb, the safe tile, and others.
+        if (isUserTile) {
+          btn.setLabel("💥").setStyle(ButtonStyle.Danger).setDisabled(true);
+        } else if (isBomb) {
+          btn.setLabel("💣").setStyle(ButtonStyle.Danger).setDisabled(true);
+        } else {
+          // The would-have-been-safe tile.
+          btn.setLabel("✅").setStyle(ButtonStyle.Success).setDisabled(true);
+        }
+      } else if (gameOver) {
+        // Unreached row after game over — leave shrouded.
+        btn.setLabel("?").setStyle(ButtonStyle.Secondary).setDisabled(true);
+      } else if (isCurrent) {
+        btn.setLabel(`L${r + 1}`).setStyle(ButtonStyle.Primary);
+      } else {
+        btn.setLabel("?").setStyle(ButtonStyle.Secondary).setDisabled(true);
+      }
+      row.addComponents(btn);
+    }
+    rows.push(row);
+  }
+  return rows;
+}
+
+const command: SlashCommand = {
+  data: new SlashCommandBuilder()
+    .setName("towers")
+    .setDescription("Climb the tower — pick the safe tile each level")
+    .addStringOption((o) =>
+      o.setName("bet").setDescription("Amount to bet").setRequired(true),
+    )
+    .addStringOption((o) =>
+      o
+        .setName("difficulty")
+        .setDescription("Tiles per row (1 bomb each). Default: medium (50/50)")
+        .setRequired(false)
+        .addChoices(
+          { name: "Easy — 1 bomb of 3 tiles (3x per level)", value: "easy" },
+          { name: "Medium — 1 bomb of 2 tiles, 50/50 (2x per level)", value: "medium" },
+          { name: "Hard — 1 bomb of 4 tiles (4x per level)", value: "hard" },
+        ),
+    ),
+  async execute(interaction: ChatInputCommandInteraction): Promise<void> {
+    if (!antiSpam(interaction.user.id)) {
+      await interaction.reply({ content: "Slow down.", ephemeral: true });
+      return;
+    }
+    const verified = await requireVerified(interaction);
+    if (!verified) return;
+    if (getSession(interaction.user.id)) {
+      await interaction.reply({
+        content: "Finish your active game first.",
+        ephemeral: true,
+      });
+      return;
+    }
+
+    const rawBet = interaction.options.getString("bet", true);
+    const difficulty =
+      (interaction.options.getString("difficulty") as Difficulty | null) ??
+      "medium";
+    const cols = DIFFICULTY_COLS[difficulty];
+    const user = await getOrCreateUser(interaction.user.id);
+    const bet = await resolveBet(interaction, user, rawBet);
+    if (!bet) return;
+
+    startSession(interaction.user.id, "towers");
+    await adjustBalance(interaction.user.id, -bet);
+
+    const refundAndAbort = async (msg: string): Promise<void> => {
+      try {
+        await adjustBalance(interaction.user.id, bet);
+      } finally {
+        endSession(interaction.user.id);
+      }
+      try {
+        if (interaction.deferred || interaction.replied) {
+          await interaction.followUp({ content: msg, ephemeral: true });
+        } else {
+          await interaction.reply({ content: msg, ephemeral: true });
+        }
+      } catch {
+        /* ignore */
+      }
+    };
+
+    const state: TowersState = {
+      bet,
+      cols,
+      difficulty,
+      currentRow: 0,
+      failed: false,
+      failedRow: -1,
+      cashedOut: false,
+      picks: new Array(ROWS),
+      bombs: new Map(),
+      willHouseWin: houseShouldWin(bet),
+    };
+
+    const cashoutDisabled = new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder()
+        .setCustomId("towers:cashout")
+        .setLabel("Cash Out")
+        .setStyle(ButtonStyle.Success)
+        .setDisabled(true),
+    );
+    const cashoutEnabled = new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder()
+        .setCustomId("towers:cashout")
+        .setLabel("Cash Out")
+        .setStyle(ButtonStyle.Success),
+    );
+
+    const buildEmbed = (status: string, mult: number) => {
+      const potential = BigInt(Math.floor(Number(state.bet) * mult));
+      return new EmbedBuilder()
+        .setColor(state.failed ? 0xef4444 : state.cashedOut ? 0x22c55e : 0x3b82f6)
+        .setTitle("Towers")
+        .setDescription(status)
+        .addFields(
+          { name: "Bet", value: formatCoins(state.bet), inline: true },
+          {
+            name: "Difficulty",
+            value: `${state.difficulty} (1 safe of ${state.cols})`,
+            inline: true,
+          },
+          {
+            name: "Level",
+            value: `${state.currentRow} / ${ROWS}`,
+            inline: true,
+          },
+          { name: "Multiplier", value: `x${mult.toFixed(2)}`, inline: true },
+          {
+            name: state.cashedOut ? "Won" : "Potential",
+            value: formatCoins(potential),
+            inline: true,
+          },
+        );
+    };
+
+    let reply;
+    try {
+      reply = await interaction.reply({
+        embeds: [
+          buildEmbed("Pick a tile in the bottom row.", multiplierFor(0, cols)),
+        ],
+        components: [...buildRows(state, false), cashoutDisabled],
+        withResponse: true,
+      });
+    } catch (err) {
+      console.error("[towers] failed to send game message:", err);
+      await refundAndAbort(
+        "Couldn't start the game (Discord error). Your bet was refunded.",
+      );
+      return;
+    }
+    const message = reply.resource?.message;
+    if (!message) {
+      await refundAndAbort(
+        "Couldn't start the game. Your bet was refunded — please try again.",
+      );
+      return;
+    }
+
+    const collector = message.createMessageComponentCollector({
+      componentType: ComponentType.Button,
+      time: 5 * 60 * 1000,
+      filter: (i) => i.user.id === interaction.user.id,
+    });
+
+    collector.on("collect", async (btn: ButtonInteraction) => {
+      if (state.failed || state.cashedOut) return;
+
+      if (btn.customId === "towers:cashout") {
+        if (state.currentRow === 0) {
+          await btn.reply({
+            content: "Climb at least one row before cashing out.",
+            ephemeral: true,
+          });
+          return;
+        }
+        state.cashedOut = true;
+        const mult = multiplierFor(state.currentRow, state.cols);
+        const payout = BigInt(Math.floor(Number(state.bet) * mult));
+        await adjustBalance(interaction.user.id, payout);
+        await recordGame({
+          discordId: interaction.user.id,
+          game: "towers",
+          bet: state.bet,
+          payout,
+          won: payout > state.bet,
+          details: {
+            level: state.currentRow,
+            difficulty: state.difficulty,
+            cols: state.cols,
+          },
+        });
+        await logGamble({
+          discordId: interaction.user.id,
+          game: "towers",
+          bet: state.bet,
+          payout,
+          won: payout > state.bet,
+          detail: `cashout at level ${state.currentRow} (${state.difficulty})`,
+        });
+        await btn.update({
+          embeds: [buildEmbed(`**Cashed out for ${formatCoins(payout)}!**`, mult)],
+          components: buildRows(state, true),
+        });
+        endSession(interaction.user.id);
+        collector.stop("cashout");
+        return;
+      }
+
+      const m = btn.customId.match(/^towers:pick:(\d+):(\d+)$/);
+      if (!m) return;
+      const r = parseInt(m[1]!, 10);
+      const c = parseInt(m[2]!, 10);
+      if (r !== state.currentRow) {
+        await btn.deferUpdate();
+        return;
+      }
+
+      const threshold = survivalThreshold(state.cols, state.willHouseWin);
+      const survive = Math.random() < threshold;
+
+      if (!survive) {
+        // Their pick is the bomb. Pick a different column to reveal as the
+        // safe tile so the user can see what they should have chosen.
+        const otherCols = Array.from({ length: state.cols }, (_, i) => i).filter(
+          (x) => x !== c,
+        );
+        const safeCol = otherCols[Math.floor(Math.random() * otherCols.length)]!;
+        const bombCols = Array.from({ length: state.cols }, (_, i) => i).filter(
+          (x) => x !== safeCol,
+        );
+        state.bombs.set(r, bombCols);
+        state.picks[r] = c;
+        state.failedRow = r;
+        state.failed = true;
+        await recordGame({
+          discordId: interaction.user.id,
+          game: "towers",
+          bet: state.bet,
+          payout: 0n,
+          won: false,
+          details: {
+            failedRow: r,
+            difficulty: state.difficulty,
+            cols: state.cols,
+          },
+        });
+        await logGamble({
+          discordId: interaction.user.id,
+          game: "towers",
+          bet: state.bet,
+          payout: 0n,
+          won: false,
+          detail: `fell at level ${r + 1} (${state.difficulty})`,
+        });
+        await btn.update({
+          embeds: [
+            buildEmbed(
+              `**BOOM — bomb on level ${r + 1}.** Lost ${formatCoins(state.bet)}.`,
+              0,
+            ),
+          ],
+          components: buildRows(state, true),
+        });
+        endSession(interaction.user.id);
+        collector.stop("explode");
+        return;
+      }
+
+      state.picks[r] = c;
+      const otherCols = Array.from({ length: state.cols }, (_, i) => i).filter(
+        (x) => x !== c,
+      );
+      state.bombs.set(r, otherCols);
+      state.currentRow += 1;
+
+      if (state.currentRow >= ROWS) {
+        state.cashedOut = true;
+        const mult = multiplierFor(ROWS, state.cols);
+        const payout = BigInt(Math.floor(Number(state.bet) * mult));
+        await adjustBalance(interaction.user.id, payout);
+        await recordGame({
+          discordId: interaction.user.id,
+          game: "towers",
+          bet: state.bet,
+          payout,
+          won: true,
+          details: {
+            level: ROWS,
+            maxedOut: true,
+            difficulty: state.difficulty,
+            cols: state.cols,
+          },
+        });
+        await logGamble({
+          discordId: interaction.user.id,
+          game: "towers",
+          bet: state.bet,
+          payout,
+          won: true,
+          detail: `topped the tower (${state.difficulty}, all ${ROWS} levels)`,
+        });
+        await btn.update({
+          embeds: [
+            buildEmbed(
+              `**Reached the top! Won ${formatCoins(payout)}.**`,
+              mult,
+            ),
+          ],
+          components: buildRows(state, true),
+        });
+        endSession(interaction.user.id);
+        collector.stop("topped");
+        return;
+      }
+
+      const mult = multiplierFor(state.currentRow, state.cols);
+      await btn.update({
+        embeds: [buildEmbed("Safe — keep climbing or cash out.", mult)],
+        components: [...buildRows(state, false), cashoutEnabled],
+      });
+    });
+
+    collector.on("end", async (_c, reason) => {
+      if (
+        reason === "cashout" ||
+        reason === "explode" ||
+        reason === "topped"
+      )
+        return;
+      if (!state.failed && !state.cashedOut) {
+        await adjustBalance(interaction.user.id, state.bet);
+        endSession(interaction.user.id);
+        try {
+          await message.edit({
+            embeds: [
+              buildEmbed(
+                "Timed out — bet refunded.",
+                multiplierFor(state.currentRow, state.cols),
+              ),
+            ],
+            components: buildRows(state, true),
+          });
+        } catch {
+          /* ignore */
+        }
+      }
+    });
+  },
+};
+
+export default command;
