@@ -43,11 +43,11 @@ export async function logGamble(params: {
 }
 
 /**
- * Post a casino-withdraw vouch line to the public vouches channel.
- * Plain-text format requested by ownership:
+ * Post a casino-withdraw vouch to the public vouches channel as a
+ * polished green embed. The displayed line reads:
  *   `Vouch <@id> — WITHDREW 500m (Casino)`
- * Discord renders the message timestamp ("Yesterday at 12:56 AM") below it
- * automatically — no need to embed it.
+ * Discord renders the timestamp ("Today at 2:19 AM") under the embed
+ * automatically.
  */
 export async function postVouch(params: {
   vouchChannelId: string;
@@ -58,33 +58,19 @@ export async function postVouch(params: {
   try {
     const ch = await cachedClient.channels.fetch(params.vouchChannelId);
     if (!ch || ch.type !== ChannelType.GuildText) return;
-    await ch.send({
-      content: `Vouch <@${params.discordId}> — WITHDREW ${formatCoinsShort(params.amount)} (Casino)`,
-      allowedMentions: { parse: [] },
-    });
-  } catch {
-    /* ignore */
-  }
-}
 
-/**
- * Post an IRL-sale vouch line. Format requested by ownership:
- *   `Vouch <@id> donut auto - SOLD 500m ($16.50)`
- * Used by `/admin irlwithdraw` when a user sells DonutSMP $ for real money
- * at the current sell rate (0.033 USD per million).
- */
-export async function postIrlSaleVouch(params: {
-  vouchChannelId: string;
-  discordId: string;
-  amountCoins: bigint;
-  usd: number;
-}): Promise<void> {
-  if (!cachedClient) return;
-  try {
-    const ch = await cachedClient.channels.fetch(params.vouchChannelId);
-    if (!ch || ch.type !== ChannelType.GuildText) return;
+    const embed = new EmbedBuilder()
+      .setColor(0x22c55e)
+      .setAuthor({ name: "Casino Withdrawal" })
+      .setDescription(
+        `Vouch <@${params.discordId}> — **WITHDREW ${formatCoinsShort(
+          params.amount,
+        )}** (Casino)`,
+      )
+      .setTimestamp(new Date());
+
     await ch.send({
-      content: `Vouch <@${params.discordId}> donut auto - SOLD ${formatCoinsShort(params.amountCoins)} ($${params.usd.toFixed(2)})`,
+      embeds: [embed],
       allowedMentions: { parse: [] },
     });
   } catch {

@@ -14,7 +14,7 @@ import {
   setBalance,
   setConfig,
 } from "../lib/db.js";
-import { formatCoins, formatCoinsShort, parseAmount } from "../lib/format.js";
+import { formatCoins, parseAmount } from "../lib/format.js";
 import type { SlashCommand } from "../lib/types.js";
 import { getConfig } from "../lib/db.js";
 import { isOwner, isWithdrawStaff } from "../lib/permissions.js";
@@ -26,13 +26,9 @@ import {
 import {
   logAdminAction,
   logWithdraw,
-  postIrlSaleVouch,
   postVouch,
 } from "../lib/gamblelog.js";
 import { CATEGORY_CONFIG_KEYS } from "../lib/tickets.js";
-
-/** USD per million coins when SELLING DonutSMP $ for real money. */
-const SELL_USD_PER_MIL = 0.033;
 
 const SUBS_OWNER_ONLY = new Set([
   "approve",
@@ -43,7 +39,7 @@ const SUBS_OWNER_ONLY = new Set([
   "setcategory",
   "config",
 ]);
-const SUBS_WITHDRAW_STAFF = new Set(["withdraw", "irlwithdraw", "help"]);
+const SUBS_WITHDRAW_STAFF = new Set(["withdraw", "help"]);
 
 const command: SlashCommand = {
   data: new SlashCommandBuilder()
@@ -87,20 +83,6 @@ const command: SlashCommand = {
           o
             .setName("amount")
             .setDescription("Amount paid out (e.g. 500m, 1bil)")
-            .setRequired(true),
-        ),
-    )
-    .addSubcommand((sc) =>
-      sc
-        .setName("irlwithdraw")
-        .setDescription("Sell DonutSMP $ for real USD (0.033/mil) and post the vouch")
-        .addUserOption((o) =>
-          o.setName("user").setDescription("User selling").setRequired(true),
-        )
-        .addStringOption((o) =>
-          o
-            .setName("amount")
-            .setDescription("Amount of DonutSMP $ they sold (e.g. 500m, 1bil)")
             .setRequired(true),
         ),
     )
@@ -204,7 +186,6 @@ const command: SlashCommand = {
       lines.push(
         "**Withdraw staff**",
         "`/admin withdraw user amount` — mark a casino withdrawal as paid",
-        "`/admin irlwithdraw user amount` — sell DonutSMP $ for USD ($0.033/mil)",
         "`/admin help` — this menu",
       );
       await interaction.reply({
@@ -354,75 +335,6 @@ const command: SlashCommand = {
           /* ignore rename failures */
         }
       }
-      return;
-    }
-
-    if (sub === "irlwithdraw") {
-      const target = interaction.options.getUser("user", true);
-      const rawAmount = interaction.options.getString("amount", true);
-      const amount = parseAmount(rawAmount);
-      if (!amount || amount <= 0n) {
-        await interaction.reply({
-          content: "Invalid amount. Try `500m`, `1bil`, or a plain number.",
-          ephemeral: true,
-        });
-        return;
-      }
-      const u = await getOrCreateUser(target.id);
-      if (BigInt(u.balance) < amount) {
-        await interaction.reply({
-          content: `User only has ${formatCoins(BigInt(u.balance))}.`,
-          ephemeral: true,
-        });
-        return;
-      }
-      // USD = (coins / 1,000,000) * 0.033
-      const millions = Number(amount) / 1_000_000;
-      const usd = Math.round(millions * SELL_USD_PER_MIL * 100) / 100;
-
-      const newBal = await adjustBalance(target.id, -amount);
-      await recordBalanceEvent({
-        discordId: target.id,
-        delta: -amount,
-        source: "irlwithdraw",
-        detail: `Sold for $${usd.toFixed(2)} by ${interaction.user.tag}`,
-      });
-      await logAdminAction({
-        actorId: interaction.user.id,
-        actorTag: interaction.user.tag,
-        action: "IRL Sale",
-        targetId: target.id,
-        amount,
-        detail: `Sold ${formatCoinsShort(amount)} for $${usd.toFixed(2)} (rate $${SELL_USD_PER_MIL}/mil). Remaining: ${formatCoins(newBal)}`,
-      });
-      await logWithdraw({
-        discordId: target.id,
-        staffId: interaction.user.id,
-        staffTag: interaction.user.tag,
-        amount,
-        kind: "irl",
-        usd,
-      });
-      await postIrlSaleVouch({
-        vouchChannelId: VOUCH_CHANNEL_ID,
-        discordId: target.id,
-        amountCoins: amount,
-        usd,
-      });
-      await interaction.reply({
-        embeds: [
-          new EmbedBuilder()
-            .setColor(0x22c55e)
-            .setTitle("IRL Sale Recorded")
-            .setDescription(
-              `<@${target.id}> sold **${formatCoinsShort(amount)}** for **$${usd.toFixed(2)}** USD.\nRemaining balance: ${formatCoins(newBal)}`,
-            )
-            .setFooter({
-              text: `By ${interaction.user.tag} · rate $${SELL_USD_PER_MIL}/mil`,
-            }),
-        ],
-        ephemeral: true,
-      });
       return;
     }
 

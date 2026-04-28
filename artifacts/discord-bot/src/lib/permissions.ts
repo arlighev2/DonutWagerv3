@@ -18,7 +18,7 @@ export const OWNER_IDS: ReadonlySet<string> = new Set([
 
 /**
  * The "withdraw staff" Discord role. Holders may run `/admin withdraw`,
- * `/admin irlwithdraw`, `/admin help`, and approve verification tickets —
+ * `/admin help`, and approve verification tickets —
  * but cannot use the rest of `/admin`, `/coupon`, etc.
  */
 export const WITHDRAW_ROLE_ID = "1498454419123998800";
@@ -46,7 +46,7 @@ function memberHasRole(
 
 /**
  * True if the invoking user is owner or has the dedicated withdraw-staff role.
- * Used to gate `/admin withdraw`, `/admin irlwithdraw`, `/admin help`.
+ * Used to gate `/admin withdraw` and `/admin help`.
  */
 export function isWithdrawStaff(
   interaction: ChatInputCommandInteraction | ButtonInteraction,
