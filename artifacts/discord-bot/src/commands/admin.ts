@@ -33,6 +33,7 @@ import {
   postVouch,
 } from "../lib/gamblelog.js";
 import { CATEGORY_CONFIG_KEYS } from "../lib/tickets.js";
+import { buildPanelMessage } from "../lib/panel_flow.js";
 
 const SUBS_OWNER_ONLY = new Set([
   "approve",
@@ -44,7 +45,7 @@ const SUBS_OWNER_ONLY = new Set([
   "config",
   "forceverify",
 ]);
-const SUBS_WITHDRAW_STAFF = new Set(["withdraw", "help"]);
+const SUBS_WITHDRAW_STAFF = new Set(["withdraw", "help", "panel"]);
 
 const command: SlashCommand = {
   data: new SlashCommandBuilder()
@@ -168,6 +169,13 @@ const command: SlashCommand = {
         ),
     )
     .addSubcommand((sc) =>
+      sc
+        .setName("panel")
+        .setDescription(
+          "Post the casino panel (Settings/Deposit/Withdraw/Balance) in this channel",
+        ),
+    )
+    .addSubcommand((sc) =>
       sc.setName("help").setDescription("Show admin commands you have access to"),
     ),
 
@@ -186,6 +194,24 @@ const command: SlashCommand = {
     if (SUBS_WITHDRAW_STAFF.has(sub) && !owner && !withdrawStaff) {
       await interaction.reply({
         content: "Withdraw staff only.",
+        ephemeral: true,
+      });
+      return;
+    }
+
+    if (sub === "panel") {
+      const ch = interaction.channel;
+      if (!ch || !("send" in ch)) {
+        await interaction.reply({
+          content: "Run this in a regular text channel.",
+          ephemeral: true,
+        });
+        return;
+      }
+      const { embed, components } = buildPanelMessage();
+      await (ch as TextChannel).send({ embeds: [embed], components });
+      await interaction.reply({
+        content: "Casino panel posted.",
         ephemeral: true,
       });
       return;

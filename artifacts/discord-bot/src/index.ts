@@ -22,10 +22,58 @@ import { setLogClient } from "./lib/gamblelog.js";
 import { isMod } from "./lib/permissions.js";
 import {
   WITHDRAW_BTN_PREFIX,
-  WITHDRAW_MODAL_PREFIX,
   handleWithdrawButton,
-  handleWithdrawModal,
 } from "./lib/withdraw_flow.js";
+import {
+  PANEL_BTN_PREFIX,
+  PANEL_MODAL_PREFIX,
+  buildPanelMessage,
+  handlePanelButton,
+  handlePanelModal,
+} from "./lib/panel_flow.js";
+
+// One-time auto-post target for the casino panel embed.
+const DEFAULT_PANEL_CHANNEL_ID = "1498881450643296400";
+const PANEL_CHANNEL_KEY = "panel_channel_id";
+const PANEL_MESSAGE_KEY = "panel_message_id";
+
+async function ensurePanelPosted(client: Client<true>): Promise<void> {
+  const channelId =
+    (await getConfig(PANEL_CHANNEL_KEY)) ?? DEFAULT_PANEL_CHANNEL_ID;
+  const channel = await client.channels.fetch(channelId).catch(() => null);
+  if (!channel || !channel.isTextBased() || !("send" in channel)) {
+    console.warn(
+      `[bot] Skipping panel auto-post — channel ${channelId} not accessible.`,
+    );
+    return;
+  }
+
+  const existingId = await getConfig(PANEL_MESSAGE_KEY);
+  if (existingId) {
+    const existing = await (channel as { messages: { fetch: (id: string) => Promise<unknown> } })
+      .messages.fetch(existingId)
+      .catch(() => null);
+    if (existing) {
+      console.log(`[bot] Casino panel already posted at message ${existingId}.`);
+      return;
+    }
+  }
+
+  const { embed, components } = buildPanelMessage();
+  const sent = await (channel as { send: (opts: unknown) => Promise<{ id: string }> })
+    .send({ embeds: [embed], components })
+    .catch((err) => {
+      console.error("[bot] Failed to post casino panel:", err);
+      return null;
+    });
+  if (sent) {
+    await setConfig(PANEL_CHANNEL_KEY, channelId);
+    await setConfig(PANEL_MESSAGE_KEY, sent.id);
+    console.log(
+      `[bot] Casino panel posted to channel ${channelId} as message ${sent.id}.`,
+    );
+  }
+}
 
 const TOKEN = process.env.DISCORD_BOT_TOKEN;
 const CLIENT_ID = process.env.DISCORD_CLIENT_ID;
@@ -210,6 +258,9 @@ async function main(): Promise<void> {
     void registerGuildCommands(c).catch((err) => {
       console.error("[bot] Guild command registration failed:", err);
     });
+    void ensurePanelPosted(c).catch((err) => {
+      console.error("[bot] Panel auto-post failed:", err);
+    });
   });
 
   // Auto-register when the bot is added to a new guild later.
@@ -239,13 +290,17 @@ async function main(): Promise<void> {
           await handleWithdrawButton(interaction);
           return;
         }
+        if (interaction.customId.startsWith(`${PANEL_BTN_PREFIX}:`)) {
+          await handlePanelButton(interaction);
+          return;
+        }
         // Other button collectors (mines, blackjack, towers) are handled in
         // their own per-message createMessageComponentCollector.
         return;
       }
       if (interaction.isModalSubmit()) {
-        if (interaction.customId.startsWith(`${WITHDRAW_MODAL_PREFIX}:`)) {
-          await handleWithdrawModal(interaction);
+        if (interaction.customId.startsWith(`${PANEL_MODAL_PREFIX}:`)) {
+          await handlePanelModal(interaction);
           return;
         }
         return;

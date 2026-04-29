@@ -119,7 +119,6 @@ const command: SlashCommand = {
     }
 
     const { embed } = buildWithdrawEmbed({
-      ownerId: interaction.user.id,
       amount,
       ign: user.minecraft_username,
       ignConfirmed: false,

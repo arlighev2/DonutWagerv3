@@ -47,13 +47,32 @@ target between `1.00–99.00` and Under/Over. Multiplier = `99/winChance`.
 `/withdraw <amount>` validates balance, opens a private ticket, **debits the
 user immediately**, and inserts a row in `bot_pending_withdrawals` keyed by
 the channel id. The ticket embed asks `your IGN is X — is that correct?`
-with three buttons: **Yes** (confirms), **No** (opens a modal to type a new
-IGN), **Cancel** (refunds + auto-deletes the channel after 10s).
+with two buttons: **Yes** (confirms) and **Cancel** (refunds + auto-deletes
+the channel after 10s). If the IGN is wrong, the user cancels and tells
+staff — no in-bot rename to keep the flow dupe-proof.
 
 `/admin withdraw <user> <amount>` checks for a pending row in the current
 channel: if one exists and matches the user/amount, it just marks it `paid`
 (no second debit). Otherwise it falls back to the legacy debit-now flow.
-Vouch + ticket-rename are unchanged.
+
+**Dupe protection:** `markPendingWithdrawalCancelled` and
+`markPendingWithdrawalPaid` use `WHERE status = 'pending'` and return a
+`boolean` reporting whether the UPDATE actually flipped the row. The cancel
+handler ALSO defers the interaction first, then only calls `adjustBalance`
+when the flip returned `true` — so simultaneous button clicks (or Discord
+double-fires) can never refund twice.
+
+### Casino panel
+
+A header embed with **⚙️ Settings**, **📥 Deposit**, **📤 Withdraw**,
+**💰 Balance** buttons. Auto-posted on bot startup to channel
+`1498881450643296400` (configurable via `bot_config.panel_channel_id`); the
+posted message id is remembered in `bot_config.panel_message_id` so reboots
+don't dupe the panel. Owners can re-post anywhere with `/admin panel`.
+
+Settings opens a verification ticket (same flow as `/verify`). Deposit and
+Withdraw open a modal asking for the amount, then create the matching
+ticket — withdraw uses the same debit-now flow as the slash command.
 
 ### Database tables (auto-created on boot)
 

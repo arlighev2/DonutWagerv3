@@ -552,22 +552,40 @@ export async function confirmPendingWithdrawalIgn(id: string): Promise<void> {
   );
 }
 
-export async function markPendingWithdrawalCancelled(id: string): Promise<void> {
-  await pool.query(
+/**
+ * Atomically flip a pending withdrawal to `cancelled`. Returns `true` only
+ * if THIS call was the one that flipped it (i.e. the row was still
+ * 'pending' when the UPDATE hit the row). The caller must use this return
+ * value to gate the refund — otherwise simultaneous button clicks would
+ * each refund the user, duplicating the balance.
+ */
+export async function markPendingWithdrawalCancelled(
+  id: string,
+): Promise<boolean> {
+  const r = await pool.query(
     `UPDATE bot_pending_withdrawals
        SET status = 'cancelled', resolved_at = NOW()
      WHERE id = $1::bigint AND status = 'pending'`,
     [id],
   );
+  return (r.rowCount ?? 0) > 0;
 }
 
-export async function markPendingWithdrawalPaid(id: string): Promise<void> {
-  await pool.query(
+/**
+ * Atomically flip a pending withdrawal to `paid`. Returns `true` only if
+ * THIS call was the one that flipped it. Callers should use this as the
+ * "did the payout actually settle?" gate.
+ */
+export async function markPendingWithdrawalPaid(
+  id: string,
+): Promise<boolean> {
+  const r = await pool.query(
     `UPDATE bot_pending_withdrawals
        SET status = 'paid', resolved_at = NOW()
      WHERE id = $1::bigint AND status = 'pending'`,
     [id],
   );
+  return (r.rowCount ?? 0) > 0;
 }
 
 export async function getConfig(key: string): Promise<string | null> {
