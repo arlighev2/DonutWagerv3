@@ -9,14 +9,32 @@
  * outcome. Pass the bet (as bigint) so the rate can be tilted automatically.
  */
 
-export const HOUSE_WIN_RATE = 0.91;
+export const HOUSE_WIN_RATE = 0.56;
 export const BIG_BET_THRESHOLD = 99_000_000n; // > 99m mil
-export const BIG_BET_HOUSE_RATE = 0.97;
+export const BIG_BET_HOUSE_RATE = 0.59;
 
 /** Effective house win rate for a given bet. */
 export function houseRateFor(bet?: bigint): number {
   if (bet !== undefined && bet > BIG_BET_THRESHOLD) return BIG_BET_HOUSE_RATE;
   return HOUSE_WIN_RATE;
+}
+
+/**
+ * How rigged a single in-game decision should be.
+ *
+ * Returns 0 when the rate is at or below 0.5 (the game is fully fair —
+ * `houseShouldWin` already coin-flips evenly so no extra bias is needed),
+ * and ramps linearly to 1.0 when the rate hits 1.0 (auto-loss in any game
+ * pre-flagged as `willHouseWin`).
+ *
+ * Games use this to interpolate their per-action bias so the same dial
+ * (HOUSE_WIN_RATE) controls both "how often does the house win the round"
+ * and "how aggressively the round is steered toward that outcome".
+ */
+export function riggingBias(bet?: bigint): number {
+  const rate = houseRateFor(bet);
+  if (rate <= 0.5) return 0;
+  return Math.min(1, (rate - 0.5) * 2);
 }
 
 /**

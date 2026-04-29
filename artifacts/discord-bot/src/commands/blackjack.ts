@@ -11,8 +11,7 @@ import {
 import { adjustBalance, getOrCreateUser, recordGame } from "../lib/db.js";
 import { formatCoins } from "../lib/format.js";
 import { antiSpam, requireVerified, resolveBet } from "../lib/guards.js";
-import { houseShouldWin } from "../lib/house.js";
-import { shuffle } from "../lib/house.js";
+import { houseShouldWin, riggingBias, shuffle } from "../lib/house.js";
 import { logGamble } from "../lib/gamblelog.js";
 import type { SlashCommand } from "../lib/types.js";
 import { endSession, getSession, startSession } from "../games/sessions.js";
@@ -100,6 +99,7 @@ interface BJState {
   dealer: Card[];
   finished: boolean;
   willHouseWin: boolean;
+  rig: number;
 }
 
 function buildEmbed(state: BJState, status: string, hideDealer: boolean) {
@@ -142,8 +142,12 @@ function controls(disabled: boolean) {
  * options in the deck, prefer cards that hurt the player / help the dealer.
  */
 function drawBiased(state: BJState, forPlayer: boolean): Card {
-  // 50% of the time use natural draw to keep some realism.
-  if (Math.random() < 0.5 || state.deck.length < 5) return state.deck.pop()!;
+  // The rigging bias dictates how often we cherry-pick a card from the
+  // deck instead of drawing the next one off the top. At rig = 0 (rate <=
+  // 0.5) every draw is the natural top-of-deck — a fully fair shoe.
+  if (state.rig <= 0 || Math.random() >= state.rig || state.deck.length < 5) {
+    return state.deck.pop()!;
+  }
 
   const playerTotal = handTotal(state.player);
   const dealerTotal = handTotal(state.dealer);
@@ -227,6 +231,7 @@ const command: SlashCommand = {
       dealer: [],
       finished: false,
       willHouseWin: houseShouldWin(bet),
+      rig: riggingBias(bet),
     };
     state.player.push(drawBiased(state, true));
     state.dealer.push(drawBiased(state, false));

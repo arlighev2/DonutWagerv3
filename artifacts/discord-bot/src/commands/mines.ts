@@ -13,7 +13,7 @@ import {
 import { adjustBalance, getOrCreateUser, recordGame } from "../lib/db.js";
 import { formatCoins } from "../lib/format.js";
 import { antiSpam, requireVerified, resolveBet } from "../lib/guards.js";
-import { houseRateFor, houseShouldWin } from "../lib/house.js";
+import { houseShouldWin, riggingBias } from "../lib/house.js";
 import { logGamble } from "../lib/gamblelog.js";
 import type { SlashCommand } from "../lib/types.js";
 import { endSession, getSession, startSession } from "../games/sessions.js";
@@ -29,24 +29,6 @@ const MAX_MINES = GRID - 1; // 24
 
 // Default mines count when the user doesn't pass one.
 const DEFAULT_MINES = 3;
-
-// Display-side house edge applied once on top of the fair multiplier.
-// The bigger swing comes from `houseShouldWin` biasing the survival roll.
-const HOUSE_EDGE_FACTOR = 0.92;
-
-// Hard ceiling: once the player's current multiplier crosses this,
-// the very next tile they click is forced to be a mine. They can still
-// cash out instead — they just can't keep climbing.
-const MAX_MULTIPLIER_BEFORE_FORCED_BOMB = 50;
-
-// In house-win games, every click (including the first) has this chance
-// of bombing on top of normal positional play. The chance scales with
-// HOUSE_WIN_RATE / BIG_BET_HOUSE_RATE so that 1.0 means "auto-lose every
-// game". Lucky games (the games NOT pre-flagged as house wins) ignore
-// this bias entirely.
-function rigChanceFor(bet: bigint): number {
-  return houseRateFor(bet);
-}
 
 interface MinesState {
   bet: bigint;
@@ -73,14 +55,17 @@ function formatSigned(delta: bigint): string {
 
 function multiplierFor(picks: number, mines: number): number {
   if (picks === 0) return 1;
+  // Pure fair multiplier: payout equals 1 / P(pick all picks safely).
+  // The house edge comes from `houseShouldWin` flipping the round's
+  // outcome and `riggingBias` swapping a mine onto a clicked safe tile.
   let m = 1;
   for (let i = 0; i < picks; i++) {
     const safeRemaining = GRID - mines - i;
     const totalRemaining = GRID - i;
-    if (safeRemaining <= 0) return m * HOUSE_EDGE_FACTOR;
+    if (safeRemaining <= 0) return m;
     m *= totalRemaining / safeRemaining;
   }
-  return m * HOUSE_EDGE_FACTOR;
+  return m;
 }
 
 function buildBoard(state: MinesState, gameOver: boolean) {
@@ -366,47 +351,48 @@ const command: SlashCommand = {
         return;
       }
 
+      // ── Survival logic ────────────────────────────────────────────────
+      // Standard 5x5 mines with one twist: when this round is pre-flagged
+      // as "house wins" AND the live rigging bias is above zero, the game
+      // can secretly relocate one of the existing pre-placed mines onto
+      // the clicked safe tile. The mine COUNT is preserved (remove one,
+      // add one) so the displayed mine total never lies.
+      //
+      // First click is always safe (regular minesweeper rule), so the
+      // earliest a rig can fire is the player's second click.
       const isFirstClick = state.revealed.size === 0;
-      const currentMult = multiplierFor(state.revealed.size, state.mines);
-      const overCeiling = currentMult > MAX_MULTIPLIER_BEFORE_FORCED_BOMB;
-
-      const rig = rigChanceFor(state.bet);
+      const rig = riggingBias(state.bet);
 
       let survive: boolean;
-      if (overCeiling) {
-        // Force a bomb on this tile, even if it was originally safe.
-        survive = false;
-        if (!state.mineTiles.has(idx)) state.mineTiles.add(idx);
-      } else if (isFirstClick) {
+      if (isFirstClick) {
         if (state.mineTiles.has(idx)) {
-          // Lucky games always survive the first click on a mine; rigged
-          // games bomb with probability `rig` (1.0 = auto-lose).
-          if (state.willHouseWin && Math.random() < rig) {
-            survive = false;
-          } else {
-            state.mineTiles.delete(idx);
-            const safe: number[] = [];
-            for (let i = 0; i < GRID; i++) {
-              if (i !== idx && !state.mineTiles.has(i)) safe.push(i);
-            }
-            if (safe.length > 0) {
-              const swapTo = safe[Math.floor(Math.random() * safe.length)]!;
-              state.mineTiles.add(swapTo);
-            }
-            survive = true;
+          // Move the unlucky mine to a random other tile.
+          state.mineTiles.delete(idx);
+          const candidates: number[] = [];
+          for (let i = 0; i < GRID; i++) {
+            if (i !== idx && !state.mineTiles.has(i)) candidates.push(i);
           }
-        } else if (state.willHouseWin && Math.random() < rig) {
-          // Rigged game: even safe first clicks can be flipped to a bomb.
-          state.mineTiles.add(idx);
-          survive = false;
-        } else {
-          survive = true;
+          if (candidates.length > 0) {
+            const swapTo =
+              candidates[Math.floor(Math.random() * candidates.length)]!;
+            state.mineTiles.add(swapTo);
+          }
         }
+        survive = true;
       } else if (state.mineTiles.has(idx)) {
-        // Real pre-placed mine.
+        // Hit one of the real pre-placed mines.
         survive = false;
-      } else if (state.willHouseWin && Math.random() < rig) {
-        // Rigged game: secretly convert this safe tile into a mine.
+      } else if (state.willHouseWin && rig > 0 && Math.random() < rig) {
+        // Rigged round: relocate one of the existing mines onto this
+        // tile so the count stays exactly `state.mines`.
+        const movable: number[] = [];
+        for (const m of state.mineTiles) {
+          if (!state.revealed.has(m)) movable.push(m);
+        }
+        if (movable.length > 0) {
+          const remove = movable[Math.floor(Math.random() * movable.length)]!;
+          state.mineTiles.delete(remove);
+        }
         state.mineTiles.add(idx);
         survive = false;
       } else {

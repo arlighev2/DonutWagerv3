@@ -76,6 +76,20 @@ export async function initSchema(): Promise<void> {
     );
     CREATE INDEX IF NOT EXISTS idx_balance_ledger_user
       ON bot_balance_ledger(discord_id, created_at DESC);
+
+    CREATE TABLE IF NOT EXISTS bot_pending_withdrawals (
+      id BIGSERIAL PRIMARY KEY,
+      discord_id VARCHAR(32) NOT NULL,
+      channel_id VARCHAR(32) NOT NULL UNIQUE,
+      amount BIGINT NOT NULL,
+      ign TEXT NOT NULL,
+      ign_confirmed BOOLEAN NOT NULL DEFAULT FALSE,
+      status VARCHAR(16) NOT NULL DEFAULT 'pending',
+      created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+      resolved_at TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_pending_withdrawals_user
+      ON bot_pending_withdrawals(discord_id, status);
   `);
 }
 
@@ -453,6 +467,107 @@ export async function getLeaderboard(
     [limit],
   );
   return r.rows;
+}
+
+export interface PendingWithdrawal {
+  id: string;
+  discord_id: string;
+  channel_id: string;
+  amount: string;
+  ign: string;
+  ign_confirmed: boolean;
+  status: "pending" | "paid" | "cancelled";
+  created_at: Date;
+  resolved_at: Date | null;
+}
+
+export async function createPendingWithdrawal(params: {
+  discordId: string;
+  channelId: string;
+  amount: bigint;
+  ign: string;
+}): Promise<PendingWithdrawal | null> {
+  const r = await pool.query<PendingWithdrawal>(
+    `INSERT INTO bot_pending_withdrawals
+       (discord_id, channel_id, amount, ign)
+     VALUES ($1, $2, $3, $4)
+     RETURNING id::text, discord_id, channel_id, amount::text, ign,
+               ign_confirmed, status, created_at, resolved_at`,
+    [
+      params.discordId,
+      params.channelId,
+      params.amount.toString(),
+      params.ign,
+    ],
+  );
+  return r.rows[0] ?? null;
+}
+
+export async function getPendingWithdrawalById(
+  id: string,
+): Promise<PendingWithdrawal | null> {
+  const r = await pool.query<PendingWithdrawal>(
+    `SELECT id::text, discord_id, channel_id, amount::text, ign,
+            ign_confirmed, status, created_at, resolved_at
+       FROM bot_pending_withdrawals
+       WHERE id = $1::bigint`,
+    [id],
+  );
+  return r.rows[0] ?? null;
+}
+
+export async function getPendingWithdrawalByChannel(
+  channelId: string,
+): Promise<PendingWithdrawal | null> {
+  const r = await pool.query<PendingWithdrawal>(
+    `SELECT id::text, discord_id, channel_id, amount::text, ign,
+            ign_confirmed, status, created_at, resolved_at
+       FROM bot_pending_withdrawals
+       WHERE channel_id = $1
+       ORDER BY created_at DESC
+       LIMIT 1`,
+    [channelId],
+  );
+  return r.rows[0] ?? null;
+}
+
+export async function updatePendingWithdrawalIgn(
+  id: string,
+  ign: string,
+): Promise<void> {
+  await pool.query(
+    `UPDATE bot_pending_withdrawals
+       SET ign = $2, ign_confirmed = FALSE
+     WHERE id = $1::bigint AND status = 'pending'`,
+    [id, ign],
+  );
+}
+
+export async function confirmPendingWithdrawalIgn(id: string): Promise<void> {
+  await pool.query(
+    `UPDATE bot_pending_withdrawals
+       SET ign_confirmed = TRUE
+     WHERE id = $1::bigint AND status = 'pending'`,
+    [id],
+  );
+}
+
+export async function markPendingWithdrawalCancelled(id: string): Promise<void> {
+  await pool.query(
+    `UPDATE bot_pending_withdrawals
+       SET status = 'cancelled', resolved_at = NOW()
+     WHERE id = $1::bigint AND status = 'pending'`,
+    [id],
+  );
+}
+
+export async function markPendingWithdrawalPaid(id: string): Promise<void> {
+  await pool.query(
+    `UPDATE bot_pending_withdrawals
+       SET status = 'paid', resolved_at = NOW()
+     WHERE id = $1::bigint AND status = 'pending'`,
+    [id],
+  );
 }
 
 export async function getConfig(key: string): Promise<string | null> {

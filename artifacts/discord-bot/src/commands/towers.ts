@@ -11,7 +11,7 @@ import {
 import { adjustBalance, getOrCreateUser, recordGame } from "../lib/db.js";
 import { formatCoins } from "../lib/format.js";
 import { antiSpam, requireVerified, resolveBet } from "../lib/guards.js";
-import { houseShouldWin } from "../lib/house.js";
+import { houseShouldWin, riggingBias } from "../lib/house.js";
 import { logGamble } from "../lib/gamblelog.js";
 import type { SlashCommand } from "../lib/types.js";
 import { endSession, getSession, startSession } from "../games/sessions.js";
@@ -20,7 +20,8 @@ import { endSession, getSession, startSession } from "../games/sessions.js";
 const ROWS = 4;
 
 // Display-side house edge applied once on top of the fair multiplier.
-// The bigger swing comes from `houseShouldWin` biasing the survival roll.
+// At HOUSE_WIN_RATE = 0.5 this stays as the only edge. As the rate
+// climbs above 0.5, `riggingBias` dials in the per-row swing.
 const HOUSE_EDGE_FACTOR = 0.95;
 
 type Difficulty = "easy" | "medium" | "hard";
@@ -55,14 +56,17 @@ function multiplierFor(level: number, cols: number): number {
   return Math.pow(cols, level) * HOUSE_EDGE_FACTOR;
 }
 
-function survivalThreshold(cols: number, willHouseWin: boolean): number {
+function survivalThreshold(
+  cols: number,
+  willHouseWin: boolean,
+  rig: number,
+): number {
   const fair = 1 / cols;
-  if (willHouseWin) {
-    // House-favored round: survival ~55% of fair odds.
-    return fair * 0.55;
-  }
-  // User-favored round: bumped above fair odds, capped so it can still bust.
-  return Math.min(0.9, fair + 0.15);
+  // At rig = 0 (HOUSE_WIN_RATE <= 0.5) every round is exactly fair.
+  // As rig ramps up, house-flagged rounds slide toward 0% survival and
+  // user-flagged rounds slide toward 100% survival.
+  if (willHouseWin) return fair * (1 - rig);
+  return fair + (1 - fair) * rig;
 }
 
 function buildRows(state: TowersState, gameOver: boolean) {
@@ -312,7 +316,11 @@ const command: SlashCommand = {
         return;
       }
 
-      const threshold = survivalThreshold(state.cols, state.willHouseWin);
+      const threshold = survivalThreshold(
+        state.cols,
+        state.willHouseWin,
+        riggingBias(state.bet),
+      );
       const survive = Math.random() < threshold;
 
       if (!survive) {

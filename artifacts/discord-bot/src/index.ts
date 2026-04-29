@@ -20,6 +20,12 @@ import {
 } from "./lib/db.js";
 import { setLogClient } from "./lib/gamblelog.js";
 import { isMod } from "./lib/permissions.js";
+import {
+  WITHDRAW_BTN_PREFIX,
+  WITHDRAW_MODAL_PREFIX,
+  handleWithdrawButton,
+  handleWithdrawModal,
+} from "./lib/withdraw_flow.js";
 
 const TOKEN = process.env.DISCORD_BOT_TOKEN;
 const CLIENT_ID = process.env.DISCORD_CLIENT_ID;
@@ -229,8 +235,19 @@ async function main(): Promise<void> {
           await handleVerifyButton(interaction);
           return;
         }
+        if (interaction.customId.startsWith(`${WITHDRAW_BTN_PREFIX}:`)) {
+          await handleWithdrawButton(interaction);
+          return;
+        }
         // Other button collectors (mines, blackjack, towers) are handled in
         // their own per-message createMessageComponentCollector.
+        return;
+      }
+      if (interaction.isModalSubmit()) {
+        if (interaction.customId.startsWith(`${WITHDRAW_MODAL_PREFIX}:`)) {
+          await handleWithdrawModal(interaction);
+          return;
+        }
         return;
       }
     } catch (err) {

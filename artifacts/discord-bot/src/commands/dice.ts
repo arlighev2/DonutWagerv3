@@ -10,20 +10,79 @@ import { houseShouldWin } from "../lib/house.js";
 import { logGamble } from "../lib/gamblelog.js";
 import type { SlashCommand } from "../lib/types.js";
 
+// Stake-style dice. Roll is a decimal between 0.01 and 100.00.
+// Player picks a target (1.00 - 99.00) and whether to roll OVER or
+// UNDER it. Win probability shrinks the multiplier accordingly.
+const MIN_TARGET = 1.0;
+const MAX_TARGET = 99.0;
+const MIN_ROLL = 0.01;
+const MAX_ROLL = 100.0;
+const HOUSE_EDGE_FACTOR = 0.99;
+
+function clampTarget(t: number): number {
+  if (Number.isNaN(t)) return 50.0;
+  return Math.min(MAX_TARGET, Math.max(MIN_TARGET, Math.round(t * 100) / 100));
+}
+
+function winChancePct(target: number, mode: "under" | "over"): number {
+  // "Under target" wins on rolls strictly less than target.
+  // "Over target" wins on rolls strictly greater than target.
+  if (mode === "under") return target;
+  return 100 - target;
+}
+
+function multiplierFor(winChance: number): number {
+  // Fair multiplier (excluding house edge) is 100 / winChance.
+  return (100 / winChance) * HOUSE_EDGE_FACTOR;
+}
+
+function rollDecimal(): number {
+  // 0.01 .. 100.00 inclusive on both ends.
+  const n = MIN_ROLL + Math.random() * (MAX_ROLL - MIN_ROLL);
+  return Math.round(n * 100) / 100;
+}
+
+function rollLosing(target: number, mode: "under" | "over"): number {
+  // "under" loses on >= target. "over" loses on <= target.
+  if (mode === "under") {
+    const min = target;
+    const span = MAX_ROLL - min;
+    return Math.round((min + Math.random() * span) * 100) / 100;
+  }
+  const max = target;
+  const span = max - MIN_ROLL;
+  return Math.round((MIN_ROLL + Math.random() * span) * 100) / 100;
+}
+
+function rollWinning(target: number, mode: "under" | "over"): number {
+  if (mode === "under") {
+    // Strictly less than target.
+    const span = target - MIN_ROLL;
+    let n = MIN_ROLL + Math.random() * span;
+    if (n >= target) n = target - 0.01;
+    return Math.round(n * 100) / 100;
+  }
+  // Strictly greater than target.
+  const span = MAX_ROLL - target;
+  let n = target + Math.random() * span;
+  if (n <= target) n = target + 0.01;
+  return Math.round(n * 100) / 100;
+}
+
 const command: SlashCommand = {
   data: new SlashCommandBuilder()
     .setName("dice")
     .setDescription(
-      "Bet on whether the dice roll (1-100) lands under 50 or above 50",
+      "Roll a 0.01-100.00 dice — pick a target and whether to roll under or over it",
     )
     .addStringOption((o) =>
       o
-        .setName("pick")
-        .setDescription("Under 50 or Above 50")
+        .setName("mode")
+        .setDescription("Win on rolls Under or Over your target")
         .setRequired(true)
         .addChoices(
-          { name: "Under 50", value: "under" },
-          { name: "Above 50", value: "above" },
+          { name: "Roll Under", value: "under" },
+          { name: "Roll Over", value: "over" },
         ),
     )
     .addStringOption((o) =>
@@ -31,6 +90,14 @@ const command: SlashCommand = {
         .setName("bet")
         .setDescription("Amount to bet (e.g. 100, 1k, all)")
         .setRequired(true),
+    )
+    .addNumberOption((o) =>
+      o
+        .setName("target")
+        .setDescription("Target between 1.00 and 99.00 (default 50.00)")
+        .setRequired(false)
+        .setMinValue(MIN_TARGET)
+        .setMaxValue(MAX_TARGET),
     ),
   async execute(interaction: ChatInputCommandInteraction): Promise<void> {
     if (!antiSpam(interaction.user.id)) {
@@ -43,34 +110,35 @@ const command: SlashCommand = {
     const verified = await requireVerified(interaction);
     if (!verified) return;
 
-    const pick = interaction.options.getString("pick", true) as
+    const mode = interaction.options.getString("mode", true) as
       | "under"
-      | "above";
+      | "over";
+    const target = clampTarget(
+      interaction.options.getNumber("target") ?? 50.0,
+    );
     const rawBet = interaction.options.getString("bet", true);
     const user = await getOrCreateUser(interaction.user.id);
     const bet = await resolveBet(interaction, user, rawBet);
     if (!bet) return;
 
+    const winChance = winChancePct(target, mode);
+    const mult = multiplierFor(winChance);
+    if (!Number.isFinite(mult) || mult <= 1) {
+      await interaction.reply({
+        content: "Pick a target with a real win chance (try 1.00 - 99.00).",
+        ephemeral: true,
+      });
+      return;
+    }
+
     await adjustBalance(interaction.user.id, -bet);
 
     const houseWins = houseShouldWin(bet);
-    const pickIsUnder = pick === "under";
-
-    // Generate a roll consistent with the predetermined outcome.
-    // "Under 50" wins on 1-49; "Above 50" wins on 51-100; 50 always favours the house.
-    let roll: number;
-    if (houseWins) {
-      roll = pickIsUnder
-        ? 50 + Math.floor(Math.random() * 51) // 50-100
-        : 1 + Math.floor(Math.random() * 50); // 1-50
-    } else {
-      roll = pickIsUnder
-        ? 1 + Math.floor(Math.random() * 49) // 1-49
-        : 51 + Math.floor(Math.random() * 50); // 51-100
-    }
-
     const won = !houseWins;
-    const payout = won ? bet * 2n : 0n;
+    const roll = won ? rollWinning(target, mode) : rollLosing(target, mode);
+
+    // Payout returns stake * mult on win, 0 on loss.
+    const payout = won ? BigInt(Math.floor(Number(bet) * mult)) : 0n;
     if (payout > 0n) await adjustBalance(interaction.user.id, payout);
 
     await recordGame({
@@ -79,7 +147,7 @@ const command: SlashCommand = {
       bet,
       payout,
       won,
-      details: { pick, roll },
+      details: { mode, target, roll, mult },
     });
     await logGamble({
       discordId: interaction.user.id,
@@ -87,23 +155,26 @@ const command: SlashCommand = {
       bet,
       payout,
       won,
-      detail: `pick:${pick} roll:${roll}`,
+      detail: `${mode} ${target.toFixed(2)} rolled ${roll.toFixed(2)} x${mult.toFixed(2)}`,
     });
 
     const after = await getOrCreateUser(interaction.user.id);
-    const pickLabel = pickIsUnder ? "Under 50" : "Above 50";
-    const rollLabel = roll < 50 ? "Under 50" : roll > 50 ? "Above 50" : "Exactly 50";
+    const targetLabel =
+      mode === "under"
+        ? `Under ${target.toFixed(2)}`
+        : `Over ${target.toFixed(2)}`;
     const embed = new EmbedBuilder()
       .setColor(won ? 0x22c55e : 0xef4444)
-      .setTitle(`🎲 Dice — Rolled ${roll}`)
+      .setTitle(`🎲 Dice — Rolled ${roll.toFixed(2)}`)
       .setDescription(
         won
           ? `**You won ${formatCoins(payout - bet)}!**\nYour balance: ${formatCoins(BigInt(after.balance))}`
           : `**You lost ${formatCoins(bet)}.**\nYour balance: ${formatCoins(BigInt(after.balance))}`,
       )
       .addFields(
-        { name: "Your Pick", value: pickLabel, inline: true },
-        { name: "Roll", value: `${roll} (${rollLabel})`, inline: true },
+        { name: "Pick", value: targetLabel, inline: true },
+        { name: "Multiplier", value: `x${mult.toFixed(2)}`, inline: true },
+        { name: "Win Chance", value: `${winChance.toFixed(2)}%`, inline: true },
         { name: "Bet", value: formatCoins(bet), inline: true },
       );
 

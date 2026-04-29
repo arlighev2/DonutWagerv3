@@ -1,12 +1,20 @@
 import {
-  EmbedBuilder,
   SlashCommandBuilder,
   type ChatInputCommandInteraction,
 } from "discord.js";
-import { getOrCreateUser } from "../lib/db.js";
+import {
+  adjustBalance,
+  createPendingWithdrawal,
+  getOrCreateUser,
+  recordBalanceEvent,
+} from "../lib/db.js";
 import { formatCoins, parseAmount } from "../lib/format.js";
 import { requireVerified } from "../lib/guards.js";
 import { createTicketChannel } from "../lib/tickets.js";
+import {
+  buildWithdrawComponents,
+  buildWithdrawEmbed,
+} from "../lib/withdraw_flow.js";
 import type { SlashCommand } from "../lib/types.js";
 
 const MIN_WITHDRAW = 1_000_000n; // 1 mil
@@ -60,6 +68,14 @@ const command: SlashCommand = {
       return;
     }
 
+    if (!user.minecraft_username) {
+      await interaction.editReply({
+        content:
+          "You aren't linked to a Minecraft account yet. Run `/verify` first.",
+      });
+      return;
+    }
+
     const ticket = await createTicketChannel({
       guild: interaction.guild,
       ownerId: interaction.user.id,
@@ -76,41 +92,54 @@ const command: SlashCommand = {
       return;
     }
 
-    const embed = new EmbedBuilder()
-      .setColor(0x22c55e)
-      .setTitle("Withdrawal Request")
-      .setDescription(
-        `Welcome <@${interaction.user.id}>!\n\nA staff member will pay you in-game on **DonutSMP**.`,
-      )
-      .addFields(
-        {
-          name: "Amount",
-          value: `$${Number(amount).toLocaleString("en-US")} DonutSMP`,
-          inline: true,
-        },
-        {
-          name: "Current Balance",
-          value: formatCoins(BigInt(user.balance)),
-          inline: true,
-        },
-        {
-          name: "How it works",
-          value:
-            "1. Confirm here that you're the verified linked player.\n" +
-            "2. A staff member will get on DonutSMP and `/pay` you the amount.\n" +
-            "3. Once you receive it, a moderator will run `/admin withdraw` here to deduct your bot balance.\n" +
-            "4. Once payout is confirmed only **staff** can close this ticket.",
-        },
-      )
-      .setFooter({ text: "Stay in this channel until payout is confirmed." });
+    // Auto-debit immediately. Refunded if the user cancels before payout.
+    const newBal = await adjustBalance(interaction.user.id, -amount);
+    await recordBalanceEvent({
+      discordId: interaction.user.id,
+      delta: -amount,
+      source: "withdraw",
+      detail: `Withdrawal request — pending in <#${ticket.channel.id}>`,
+    });
+
+    const pending = await createPendingWithdrawal({
+      discordId: interaction.user.id,
+      channelId: ticket.channel.id,
+      amount,
+      ign: user.minecraft_username,
+    });
+
+    if (!pending) {
+      // Roll back the debit if we somehow couldn't create the pending row.
+      await adjustBalance(interaction.user.id, amount);
+      await interaction.editReply({
+        content:
+          "Couldn't open the withdrawal request. Your balance was not deducted.",
+      });
+      return;
+    }
+
+    const { embed } = buildWithdrawEmbed({
+      ownerId: interaction.user.id,
+      amount,
+      ign: user.minecraft_username,
+      ignConfirmed: false,
+    });
+    const components = buildWithdrawComponents({
+      pendingId: pending.id,
+      ignConfirmed: false,
+    });
 
     const mention = ticket.modRoleId
       ? `<@${interaction.user.id}> · <@&${ticket.modRoleId}>`
       : `<@${interaction.user.id}>`;
-    await ticket.channel.send({ content: mention, embeds: [embed] });
+    await ticket.channel.send({
+      content: mention,
+      embeds: [embed],
+      components,
+    });
 
     await interaction.editReply({
-      content: `Ticket created: <#${ticket.channel.id}>`,
+      content: `Ticket created: <#${ticket.channel.id}>\n${formatCoins(amount)} has been deducted from your balance — refunded if you cancel before payout.\nNew balance: ${formatCoins(newBal)}`,
     });
   },
 };

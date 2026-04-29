@@ -10,6 +10,8 @@ import {
   adjustBalance,
   findUserByMinecraftUsername,
   getOrCreateUser,
+  getPendingWithdrawalByChannel,
+  markPendingWithdrawalPaid,
   recordBalanceEvent,
   resetUserStats,
   setBalance,
@@ -283,21 +285,40 @@ const command: SlashCommand = {
         });
         return;
       }
-      const u = await getOrCreateUser(target.id);
-      if (BigInt(u.balance) < amount) {
-        await interaction.reply({
-          content: `User only has ${formatCoins(BigInt(u.balance))}.`,
-          ephemeral: true,
+
+      // If there's a pending withdrawal row for this channel, the user has
+      // already been debited at /withdraw time. We just settle it.
+      const pending = interaction.channelId
+        ? await getPendingWithdrawalByChannel(interaction.channelId)
+        : null;
+      const pendingMatches =
+        pending &&
+        pending.status === "pending" &&
+        pending.discord_id === target.id &&
+        BigInt(pending.amount) === amount;
+
+      let newBal: bigint;
+      if (pendingMatches && pending) {
+        await markPendingWithdrawalPaid(pending.id);
+        const u = await getOrCreateUser(target.id);
+        newBal = BigInt(u.balance);
+      } else {
+        const u = await getOrCreateUser(target.id);
+        if (BigInt(u.balance) < amount) {
+          await interaction.reply({
+            content: `User only has ${formatCoins(BigInt(u.balance))}.`,
+            ephemeral: true,
+          });
+          return;
+        }
+        newBal = await adjustBalance(target.id, -amount);
+        await recordBalanceEvent({
+          discordId: target.id,
+          delta: -amount,
+          source: "withdraw",
+          detail: `Casino payout by ${interaction.user.tag}`,
         });
-        return;
       }
-      const newBal = await adjustBalance(target.id, -amount);
-      await recordBalanceEvent({
-        discordId: target.id,
-        delta: -amount,
-        source: "withdraw",
-        detail: `Casino payout by ${interaction.user.tag}`,
-      });
       await logAdminAction({
         actorId: interaction.user.id,
         actorTag: interaction.user.tag,
