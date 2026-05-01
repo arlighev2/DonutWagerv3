@@ -1,3 +1,4 @@
+import { randomInt } from "node:crypto";
 import {
   EmbedBuilder,
   SlashCommandBuilder,
@@ -6,11 +7,30 @@ import {
 import { adjustBalance, getOrCreateUser, recordGame } from "../lib/db.js";
 import { formatCoins } from "../lib/format.js";
 import { antiSpam, requireVerified, resolveBet } from "../lib/guards.js";
-import { houseShouldWin } from "../lib/house.js";
 import { logGamble } from "../lib/gamblelog.js";
 import type { SlashCommand } from "../lib/types.js";
 
-// European wheel: 0 is green; reds and blacks alternate.
+const HOUSE_WIN_RATE = 0.54;
+const BIG_BET_THRESHOLD = 49_000_000n;
+const BIG_BET_HOUSE_RATE = 0.57;
+const WHALE_BET_THRESHOLD = 74_000_000n;
+const WHALE_BET_HOUSE_RATE = 0.59;
+const MEGA_WHALE_BET_THRESHOLD = 99_000_000n;
+const MEGA_WHALE_BET_HOUSE_RATE = 0.61;
+
+function houseRateFor(bet?: bigint): number {
+  if (bet !== undefined) {
+    if (bet > MEGA_WHALE_BET_THRESHOLD) return MEGA_WHALE_BET_HOUSE_RATE;
+    if (bet > WHALE_BET_THRESHOLD) return WHALE_BET_HOUSE_RATE;
+    if (bet > BIG_BET_THRESHOLD) return BIG_BET_HOUSE_RATE;
+  }
+  return HOUSE_WIN_RATE;
+}
+
+function houseShouldWin(bet?: bigint): boolean {
+  return Math.random() < houseRateFor(bet);
+}
+
 const RED_NUMBERS = new Set([
   1, 3, 5, 7, 9, 12, 14, 16, 18, 19, 21, 23, 25, 27, 30, 32, 34, 36,
 ]);
@@ -20,20 +40,26 @@ function colorOf(n: number): "red" | "black" | "green" {
   return RED_NUMBERS.has(n) ? "red" : "black";
 }
 
+function securePick<T>(items: readonly T[]): T {
+  return items[randomInt(0, items.length)]!;
+}
+
 interface BetSpec {
   label: string;
-  payout: number; // multiplier on stake (winnings only)
+  payout: number;
   matches: (n: number) => boolean;
-  /** Pick a number that satisfies / doesn't satisfy this bet. */
   rigToSatisfy: (satisfy: boolean) => number;
 }
 
-function rigByPredicate(pred: (n: number) => boolean, satisfy: boolean): number {
+function rigByPredicate(
+  pred: (n: number) => boolean,
+  satisfy: boolean,
+): number {
   const candidates: number[] = [];
   for (let i = 0; i <= 36; i++) {
     if (pred(i) === satisfy) candidates.push(i);
   }
-  return candidates[Math.floor(Math.random() * candidates.length)]!;
+  return securePick(candidates);
 }
 
 function buildBet(choice: string): BetSpec | null {
@@ -57,7 +83,7 @@ function buildBet(choice: string): BetSpec | null {
         label: "Green (0)",
         payout: 35,
         matches: (n) => n === 0,
-        rigToSatisfy: (s) => (s ? 0 : 1 + Math.floor(Math.random() * 36)),
+        rigToSatisfy: (s) => (s ? 0 : randomInt(1, 37)),
       };
     case "even":
       return {

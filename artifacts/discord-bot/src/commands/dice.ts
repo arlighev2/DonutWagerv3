@@ -1,3 +1,4 @@
+import { randomInt } from "node:crypto";
 import {
   EmbedBuilder,
   SlashCommandBuilder,
@@ -6,18 +7,40 @@ import {
 import { adjustBalance, getOrCreateUser, recordGame } from "../lib/db.js";
 import { formatCoins } from "../lib/format.js";
 import { antiSpam, requireVerified, resolveBet } from "../lib/guards.js";
-import { houseShouldWin } from "../lib/house.js";
 import { logGamble } from "../lib/gamblelog.js";
 import type { SlashCommand } from "../lib/types.js";
 
-// Stake-style dice. Roll is a decimal between 0.01 and 100.00.
-// Player picks a target (1.00 - 99.00) and whether to roll OVER or
-// UNDER it. Win probability shrinks the multiplier accordingly.
+const HOUSE_WIN_RATE = 0.55;
+const BIG_BET_THRESHOLD = 49_000_000n;
+const BIG_BET_HOUSE_RATE = 0.57;
+const WHALE_BET_THRESHOLD = 74_000_000n;
+const WHALE_BET_HOUSE_RATE = 0.59;
+const MEGA_WHALE_BET_THRESHOLD = 99_000_000n;
+const MEGA_WHALE_BET_HOUSE_RATE = 0.61;
+
+function houseRateFor(bet?: bigint): number {
+  if (bet !== undefined) {
+    if (bet > MEGA_WHALE_BET_THRESHOLD) return MEGA_WHALE_BET_HOUSE_RATE;
+    if (bet > WHALE_BET_THRESHOLD) return WHALE_BET_HOUSE_RATE;
+    if (bet > BIG_BET_THRESHOLD) return BIG_BET_HOUSE_RATE;
+  }
+  return HOUSE_WIN_RATE;
+}
+
+function houseShouldWin(bet?: bigint): boolean {
+  return Math.random() < houseRateFor(bet);
+}
+
 const MIN_TARGET = 1.0;
 const MAX_TARGET = 99.0;
 const MIN_ROLL = 0.01;
 const MAX_ROLL = 100.0;
 const HOUSE_EDGE_FACTOR = 0.99;
+const ROLL_STEPS = 10000;
+
+function secureIntInclusive(min: number, max: number): number {
+  return randomInt(min, max + 1);
+}
 
 function clampTarget(t: number): number {
   if (Number.isNaN(t)) return 50.0;
@@ -25,48 +48,36 @@ function clampTarget(t: number): number {
 }
 
 function winChancePct(target: number, mode: "under" | "over"): number {
-  // "Under target" wins on rolls strictly less than target.
-  // "Over target" wins on rolls strictly greater than target.
-  if (mode === "under") return target;
-  return 100 - target;
+  return mode === "under" ? target : 100 - target;
 }
 
 function multiplierFor(winChance: number): number {
-  // Fair multiplier (excluding house edge) is 100 / winChance.
   return (100 / winChance) * HOUSE_EDGE_FACTOR;
 }
 
-function rollDecimal(): number {
-  // 0.01 .. 100.00 inclusive on both ends.
-  const n = MIN_ROLL + Math.random() * (MAX_ROLL - MIN_ROLL);
-  return Math.round(n * 100) / 100;
+function stepToRoll(step: number): number {
+  return Math.round(step) / 100;
 }
 
 function rollLosing(target: number, mode: "under" | "over"): number {
-  // "under" loses on >= target. "over" loses on <= target.
   if (mode === "under") {
-    const min = target;
-    const span = MAX_ROLL - min;
-    return Math.round((min + Math.random() * span) * 100) / 100;
+    return stepToRoll(secureIntInclusive(Math.ceil(target * 100), ROLL_STEPS));
   }
-  const max = target;
-  const span = max - MIN_ROLL;
-  return Math.round((MIN_ROLL + Math.random() * span) * 100) / 100;
+  return stepToRoll(secureIntInclusive(1, Math.floor(target * 100)));
 }
 
 function rollWinning(target: number, mode: "under" | "over"): number {
   if (mode === "under") {
-    // Strictly less than target.
-    const span = target - MIN_ROLL;
-    let n = MIN_ROLL + Math.random() * span;
-    if (n >= target) n = target - 0.01;
-    return Math.round(n * 100) / 100;
+    return stepToRoll(
+      secureIntInclusive(1, Math.max(1, Math.ceil(target * 100) - 1)),
+    );
   }
-  // Strictly greater than target.
-  const span = MAX_ROLL - target;
-  let n = target + Math.random() * span;
-  if (n <= target) n = target + 0.01;
-  return Math.round(n * 100) / 100;
+  return stepToRoll(
+    secureIntInclusive(
+      Math.min(ROLL_STEPS, Math.floor(target * 100) + 1),
+      ROLL_STEPS,
+    ),
+  );
 }
 
 const command: SlashCommand = {
@@ -133,11 +144,9 @@ const command: SlashCommand = {
 
     await adjustBalance(interaction.user.id, -bet);
 
-    const houseWins = houseShouldWin(bet);
-    const won = !houseWins;
+    const won = !houseShouldWin(bet);
     const roll = won ? rollWinning(target, mode) : rollLosing(target, mode);
 
-    // Payout returns stake * mult on win, 0 on loss.
     const payout = won ? BigInt(Math.floor(Number(bet) * mult)) : 0n;
     if (payout > 0n) await adjustBalance(interaction.user.id, payout);
 

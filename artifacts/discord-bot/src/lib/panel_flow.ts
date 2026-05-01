@@ -41,7 +41,7 @@ export function buildPanelMessage(): {
       [
         "**How to Play:**",
         "",
-        "1. Click ⚙️ **Settings** to set your gambling username",
+        "1. Run `/verify` to link your Minecraft account",
         "2. Click 📥 **Deposit** to open a deposit ticket",
         "3. Use slash commands to play games",
         "4. Click 📤 **Withdraw** to cash out",
@@ -51,9 +51,11 @@ export function buildPanelMessage(): {
         "🎲 `/dice <bet> <target>` — Over target to win",
         "💣 `/mines <bet> [mines]` — Avoid mines, cash out anytime",
         "🃏 `/blackjack <bet>` — Beat the dealer",
+        "🎡 `/roulette <bet> <red/black/number>` — Spin the wheel!",
         "",
         "**Limits:** 1m – ∞ per bet",
         "Use `/balance` to check your wallet.",
+        "### More commands with /help",
       ].join("\n"),
     )
     .setFooter({
@@ -61,11 +63,6 @@ export function buildPanelMessage(): {
     });
 
   const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
-    new ButtonBuilder()
-      .setCustomId(`${PANEL_BTN_PREFIX}:settings`)
-      .setLabel("Settings")
-      .setEmoji("⚙️")
-      .setStyle(ButtonStyle.Secondary),
     new ButtonBuilder()
       .setCustomId(`${PANEL_BTN_PREFIX}:deposit`)
       .setLabel("Deposit")
@@ -104,25 +101,6 @@ function amountModal(action: "deposit" | "withdraw"): ModalBuilder {
   return modal;
 }
 
-function ignModal(currentIgn: string | null): ModalBuilder {
-  const modal = new ModalBuilder()
-    .setCustomId(`${PANEL_MODAL_PREFIX}:settings`)
-    .setTitle("Set your Minecraft IGN");
-  const input = new TextInputBuilder()
-    .setCustomId("ign")
-    .setLabel("Minecraft IGN (3-16 chars)")
-    .setPlaceholder("e.g. Notch")
-    .setRequired(true)
-    .setMinLength(3)
-    .setMaxLength(16)
-    .setStyle(TextInputStyle.Short);
-  if (currentIgn) input.setValue(currentIgn);
-  modal.addComponents(
-    new ActionRowBuilder<TextInputBuilder>().addComponents(input),
-  );
-  return modal;
-}
-
 export async function handlePanelButton(
   interaction: ButtonInteraction,
 ): Promise<void> {
@@ -138,19 +116,17 @@ export async function handlePanelButton(
     return;
   }
 
-  if (action === "settings") {
+  if (action === "deposit" || action === "withdraw") {
     const user = await getOrCreateUser(interaction.user.id);
-    await interaction.showModal(ignModal(user.minecraft_username ?? null));
-    return;
-  }
-
-  if (action === "deposit") {
-    await interaction.showModal(amountModal("deposit"));
-    return;
-  }
-
-  if (action === "withdraw") {
-    await interaction.showModal(amountModal("withdraw"));
+    if (!user.verified || !user.minecraft_username) {
+      await interaction.reply({
+        content:
+          "You need to verify your Minecraft account first. Please run `/verify` to link your IGN before depositing or withdrawing.",
+        ephemeral: true,
+      });
+      return;
+    }
+    await interaction.showModal(amountModal(action as "deposit" | "withdraw"));
     return;
   }
 }
@@ -160,77 +136,6 @@ export async function handlePanelModal(
 ): Promise<void> {
   const action = interaction.customId.split(":")[1];
   if (!action) return;
-
-  if (action === "settings") {
-    const ign = interaction.fields.getTextInputValue("ign").trim();
-    if (!/^[A-Za-z0-9_]{3,16}$/.test(ign)) {
-      await interaction.reply({
-        content:
-          "Invalid IGN. Minecraft names are 3–16 letters/numbers/underscores.",
-        ephemeral: true,
-      });
-      return;
-    }
-    if (!interaction.guild) {
-      await interaction.reply({
-        content: "Use this in a server.",
-        ephemeral: true,
-      });
-      return;
-    }
-    await interaction.deferReply({ ephemeral: true });
-
-    // Open a verification ticket the same way `/verify` does — staff still
-    // approves before the link goes live.
-    await getOrCreateUser(interaction.user.id);
-    const ticket = await createTicketChannel({
-      guild: interaction.guild,
-      ownerId: interaction.user.id,
-      ownerUsername: interaction.user.username,
-      kind: "verify",
-      topic: `Verification ticket — ${ign}`,
-    });
-    if (!ticket) {
-      await interaction.editReply({
-        content:
-          "Couldn't open a verification ticket. Make sure I have **Manage Channels** permission.",
-      });
-      return;
-    }
-
-    const verifyEmbed = new EmbedBuilder()
-      .setColor(0xfacc15)
-      .setTitle("Verification Request")
-      .setDescription(
-        `<@${interaction.user.id}> wants to set their Minecraft IGN to **\`${ign}\`**.\n\nA staff member will approve or deny below.`,
-      )
-      .setFooter({ text: `Discord ID: ${interaction.user.id}` });
-
-    const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder()
-        .setCustomId(`verify:approve:${interaction.user.id}:${ign}`)
-        .setLabel("Approve")
-        .setStyle(ButtonStyle.Success),
-      new ButtonBuilder()
-        .setCustomId(`verify:deny:${interaction.user.id}`)
-        .setLabel("Deny")
-        .setStyle(ButtonStyle.Danger),
-    );
-
-    const mention = ticket.modRoleId
-      ? `<@${interaction.user.id}> · <@&${ticket.modRoleId}>`
-      : `<@${interaction.user.id}>`;
-    await ticket.channel.send({
-      content: mention,
-      embeds: [verifyEmbed],
-      components: [row],
-    });
-
-    await interaction.editReply({
-      content: `Verification ticket opened: <#${ticket.channel.id}>`,
-    });
-    return;
-  }
 
   if (action === "deposit" || action === "withdraw") {
     const raw = interaction.fields.getTextInputValue("amount").trim();
@@ -265,7 +170,7 @@ export async function handlePanelModal(
     if (!user.verified || !user.minecraft_username) {
       await interaction.editReply({
         content:
-          "You aren't linked to a Minecraft account yet. Click **⚙️ Settings** first to set your IGN.",
+          "You need to verify your Minecraft account first. Please run `/verify` to link your IGN before depositing or withdrawing.",
       });
       return;
     }
@@ -374,5 +279,4 @@ export async function handlePanelModal(
     });
     return;
   }
-
 }

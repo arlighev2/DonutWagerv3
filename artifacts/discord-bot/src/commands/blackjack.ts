@@ -11,10 +11,45 @@ import {
 import { adjustBalance, getOrCreateUser, recordGame } from "../lib/db.js";
 import { formatCoins } from "../lib/format.js";
 import { antiSpam, requireVerified, resolveBet } from "../lib/guards.js";
-import { houseShouldWin, riggingBias, shuffle } from "../lib/house.js";
 import { logGamble } from "../lib/gamblelog.js";
 import type { SlashCommand } from "../lib/types.js";
 import { endSession, getSession, startSession } from "../games/sessions.js";
+
+// ── House edge constants ────────────────────────────────────────────────────
+const HOUSE_WIN_RATE = 0.54;
+const BIG_BET_THRESHOLD = 49_000_000n;
+const BIG_BET_HOUSE_RATE = 0.57;
+const WHALE_BET_THRESHOLD = 74_000_000n;
+const WHALE_BET_HOUSE_RATE = 0.59;
+const MEGA_WHALE_BET_THRESHOLD = 99_000_000n;
+const MEGA_WHALE_BET_HOUSE_RATE = 0.61;
+
+function houseRate(bet: bigint): number {
+  if (bet >= MEGA_WHALE_BET_THRESHOLD) return MEGA_WHALE_BET_HOUSE_RATE;
+  if (bet >= WHALE_BET_THRESHOLD) return WHALE_BET_HOUSE_RATE;
+  if (bet >= BIG_BET_THRESHOLD) return BIG_BET_HOUSE_RATE;
+  return HOUSE_WIN_RATE;
+}
+
+function houseShouldWin(bet: bigint): boolean {
+  return Math.random() < houseRate(bet);
+}
+
+function riggingBias(bet: bigint): number {
+  const rate = houseRate(bet);
+  return Math.max(0, (rate - 0.5) / 0.5);
+}
+
+function shuffle<T>(arr: T[]): T[] {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    const tmp = arr[i]!;
+    arr[i] = arr[j]!;
+    arr[j] = tmp;
+  }
+  return arr;
+}
+// ───────────────────────────────────────────────────────────────────────────
 
 type Suit = "♠" | "♥" | "♦" | "♣";
 type Rank =
@@ -81,7 +116,6 @@ function handTotal(hand: Card[]): number {
 }
 
 function renderCard(c: Card): string {
-  const color = c.suit === "♥" || c.suit === "♦" ? "🟥" : "⬛";
   return `\`${c.rank}${c.suit}\``;
 }
 
@@ -142,9 +176,6 @@ function controls(disabled: boolean) {
  * options in the deck, prefer cards that hurt the player / help the dealer.
  */
 function drawBiased(state: BJState, forPlayer: boolean): Card {
-  // The rigging bias dictates how often we cherry-pick a card from the
-  // deck instead of drawing the next one off the top. At rig = 0 (rate <=
-  // 0.5) every draw is the natural top-of-deck — a fully fair shoe.
   if (state.rig <= 0 || Math.random() >= state.rig || state.deck.length < 5) {
     return state.deck.pop()!;
   }
@@ -160,14 +191,12 @@ function drawBiased(state: BJState, forPlayer: boolean): Card {
     const av = cardValue(a.rank);
     const bv = cardValue(b.rank);
     if (wantBust) {
-      // Prefer high cards to bust the player
       const aBusts = playerTotal + av > 21;
       const bBusts = playerTotal + bv > 21;
       if (aBusts !== bBusts) return aBusts ? -1 : 1;
       return bv - av;
     }
     if (wantHelpDealer) {
-      // Bring dealer toward 17-21
       const aGood = dealerTotal + av >= 17 && dealerTotal + av <= 21;
       const bGood = dealerTotal + bv >= 17 && dealerTotal + bv <= 21;
       if (aGood !== bGood) return aGood ? -1 : 1;
@@ -241,7 +270,6 @@ const command: SlashCommand = {
     const playerTotal = handTotal(state.player);
     const dealerTotal = handTotal(state.dealer);
 
-    // Natural blackjack check
     const blackjack = playerTotal === 21;
     const dealerBlackjack = dealerTotal === 21;
 
@@ -260,7 +288,6 @@ const command: SlashCommand = {
       btn: ButtonInteraction | null,
       doubled = false,
     ): Promise<void> => {
-      // Dealer plays
       while (handTotal(state.dealer) < 17) {
         state.dealer.push(drawBiased(state, false));
       }
@@ -322,11 +349,10 @@ const command: SlashCommand = {
     };
 
     if (blackjack || dealerBlackjack) {
-      // Resolve immediately (player BJ pays 2.5x stake)
       let payout = 0n;
       let label: string;
       if (blackjack && !dealerBlackjack) {
-        payout = (state.bet * 5n) / 2n + state.bet; // returns stake + 1.5x
+        payout = (state.bet * 5n) / 2n + state.bet;
         label = `**Blackjack! You won ${formatCoins(payout - state.bet)}.**`;
         await adjustBalance(interaction.user.id, payout);
       } else if (!blackjack && dealerBlackjack) {

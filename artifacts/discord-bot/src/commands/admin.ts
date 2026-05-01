@@ -35,9 +35,12 @@ import {
 import { CATEGORY_CONFIG_KEYS } from "../lib/tickets.js";
 import { buildPanelMessage } from "../lib/panel_flow.js";
 
+const DEPOSIT_LOG_CHANNEL_IDS = ["1498419875021066240", "1498440931026927817"];
+
 const SUBS_OWNER_ONLY = new Set([
   "approve",
   "deny",
+  "deposit",
   "setbalance",
   "resetstats",
   "setmodrole",
@@ -76,6 +79,20 @@ const command: SlashCommand = {
         )
         .addStringOption((o) =>
           o.setName("reason").setDescription("Reason").setRequired(true),
+        ),
+    )
+    .addSubcommand((sc) =>
+      sc
+        .setName("deposit")
+        .setDescription("Deposit coins directly into a user's balance")
+        .addUserOption((o) =>
+          o.setName("user").setDescription("User to deposit to").setRequired(true),
+        )
+        .addStringOption((o) =>
+          o
+            .setName("amount")
+            .setDescription("Amount to deposit (e.g. 10m, 500k, 1bil)")
+            .setRequired(true),
         ),
     )
     .addSubcommand((sc) =>
@@ -224,6 +241,7 @@ const command: SlashCommand = {
           "**Owner**",
           "`/admin approve user amount` — credit a user's deposit",
           "`/admin deny user reason` — reject a deposit",
+          "`/admin deposit user amount` — directly deposit coins into a user's balance",
           "`/admin setbalance user amount` — set a user's balance",
           "`/admin resetstats user` — wipe balance + game stats",
           "`/admin forceverify user minecraft` — force-link a Discord user to a Minecraft name",
@@ -300,6 +318,56 @@ const command: SlashCommand = {
       return;
     }
 
+    if (sub === "deposit") {
+      const target = interaction.options.getUser("user", true);
+      const rawAmount = interaction.options.getString("amount", true);
+      const amount = parseAmount(rawAmount);
+      if (!amount || amount <= 0n) {
+        await interaction.reply({
+          content: "Invalid amount. Try `10m`, `500k`, `1bil`, or a plain number.",
+          ephemeral: true,
+        });
+        return;
+      }
+
+      await getOrCreateUser(target.id);
+      const newBal = await adjustBalance(target.id, amount);
+      await recordBalanceEvent({
+        discordId: target.id,
+        delta: amount,
+        source: "deposit",
+        detail: `deposit`,
+      });
+
+      const embed = new EmbedBuilder()
+        .setColor(0x22c55e)
+        .setTitle("💰 Deposit")
+        .addFields(
+          { name: "User", value: `<@${target.id}>`, inline: true },
+          { name: "Amount", value: formatCoins(amount), inline: true },
+          { name: "New Balance", value: formatCoins(newBal), inline: true },
+          { name: "By", value: `<@${interaction.user.id}>`, inline: true },
+          { name: "Note", value: "deposit", inline: true },
+        )
+        .setTimestamp()
+        .setFooter({ text: `Deposited by ${interaction.user.tag}` });
+
+      await interaction.reply({ embeds: [embed], ephemeral: true });
+
+      // Log to payment channels only.
+      for (const channelId of DEPOSIT_LOG_CHANNEL_IDS) {
+        try {
+          const logChannel = await interaction.client.channels.fetch(channelId);
+          if (logChannel?.isTextBased()) {
+            await logChannel.send({ embeds: [embed] });
+          }
+        } catch {
+          // Channel unreachable — deposit still went through.
+        }
+      }
+      return;
+    }
+
     if (sub === "withdraw") {
       const target = interaction.options.getUser("user", true);
       const rawAmount = interaction.options.getString("amount", true);
@@ -312,8 +380,6 @@ const command: SlashCommand = {
         return;
       }
 
-      // If there's a pending withdrawal row for this channel, the user has
-      // already been debited at /withdraw time. We just settle it.
       const pending = interaction.channelId
         ? await getPendingWithdrawalByChannel(interaction.channelId)
         : null;
@@ -372,14 +438,12 @@ const command: SlashCommand = {
         ],
       });
 
-      // Public vouch.
       await postVouch({
         vouchChannelId: VOUCH_CHANNEL_ID,
         discordId: target.id,
         amount,
       });
 
-      // If we're inside a withdrawal ticket, lock it down so only mods can close.
       const ch = interaction.channel;
       if (
         ch &&

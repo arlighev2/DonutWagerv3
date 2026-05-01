@@ -13,22 +13,46 @@ import {
 import { adjustBalance, getOrCreateUser, recordGame } from "../lib/db.js";
 import { formatCoins } from "../lib/format.js";
 import { antiSpam, requireVerified, resolveBet } from "../lib/guards.js";
-import { houseShouldWin, riggingBias } from "../lib/house.js";
+import { houseShouldWin } from "../lib/house.js";
 import { logGamble } from "../lib/gamblelog.js";
 import type { SlashCommand } from "../lib/types.js";
 import { endSession, getSession, startSession } from "../games/sessions.js";
 
-// 5x5 board: 25 tiles fill all 5 standard action rows. To still fit the
-// Cash Out button on the same message we use Discord's Components V2 layout
-// (Container with TextDisplay + 5 board rows + 1 cashout row), which lifts
-// the 5-row cap to 10.
 const COLS = 5;
 const ROWS = 5;
-const GRID = COLS * ROWS; // 25
-const MAX_MINES = GRID - 1; // 24
-
-// Default mines count when the user doesn't pass one.
+const GRID = COLS * ROWS;
+const MAX_MINES = GRID - 1;
 const DEFAULT_MINES = 3;
+
+// ── HOUSE WIN RATES BY BET SIZE ──────────────────────────────────────────────
+const HOUSE_WIN_RATE = 0.55;
+const BIG_BET_THRESHOLD = 49_000_000n;
+const BIG_BET_HOUSE_RATE = 0.57;
+const WHALE_BET_THRESHOLD = 74_000_000n;
+const WHALE_BET_HOUSE_RATE = 0.60;
+const MEGA_WHALE_BET_THRESHOLD = 99_000_000n;
+const MEGA_WHALE_BET_HOUSE_RATE = 0.64;
+
+// Flat house cut applied to every cashout multiplier. 0.93 = 7% rake.
+const HOUSE_CUT = 0.93;
+
+// Once the player's current multiplier hits this, the next click is forced
+// to bust — keeps the house edge on long runs (automine protection).
+const AUTO_BUST_MULT = 18.0;
+
+// Per-click rig probability when the house is scheduled to win this session.
+// This is a moderate uniform chance applied to every click; combined with the
+// ceiling bust above it produces the target overall win rates.
+const HOUSE_RIG_CHANCE = 0.14;
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+function houseWinRateForBet(bet: bigint): number {
+  if (bet >= MEGA_WHALE_BET_THRESHOLD) return MEGA_WHALE_BET_HOUSE_RATE;
+  if (bet >= WHALE_BET_THRESHOLD) return WHALE_BET_HOUSE_RATE;
+  if (bet >= BIG_BET_THRESHOLD) return BIG_BET_HOUSE_RATE;
+  return HOUSE_WIN_RATE;
+}
 
 interface MinesState {
   bet: bigint;
@@ -44,7 +68,7 @@ interface MinesState {
 
 type EndSummary = {
   multiplier: number;
-  netDelta: bigint; // signed: + for cashout, - for bust
+  netDelta: bigint;
   newBalance: bigint;
 };
 
@@ -53,11 +77,8 @@ function formatSigned(delta: bigint): string {
   return `-${formatCoins(-delta)}`;
 }
 
-function multiplierFor(picks: number, mines: number): number {
+function fairMultiplier(picks: number, mines: number): number {
   if (picks === 0) return 1;
-  // Pure fair multiplier: payout equals 1 / P(pick all picks safely).
-  // The house edge comes from `houseShouldWin` flipping the round's
-  // outcome and `riggingBias` swapping a mine onto a clicked safe tile.
   let m = 1;
   for (let i = 0; i < picks; i++) {
     const safeRemaining = GRID - mines - i;
@@ -66,6 +87,15 @@ function multiplierFor(picks: number, mines: number): number {
     m *= totalRemaining / safeRemaining;
   }
   return m;
+}
+
+function multiplierFor(picks: number, mines: number): number {
+  return fairMultiplier(picks, mines) * HOUSE_CUT;
+}
+
+function liveRig(state: MinesState): number {
+  if (!state.willHouseWin) return 0;
+  return HOUSE_RIG_CHANCE;
 }
 
 function buildBoard(state: MinesState, gameOver: boolean) {
@@ -184,7 +214,7 @@ const command: SlashCommand = {
     .addIntegerOption((o) =>
       o
         .setName("mines")
-        .setDescription(`Number of mines (1-${MAX_MINES}, default ${DEFAULT_MINES} = ~50/50)`)
+        .setDescription(`Number of mines (1-${MAX_MINES}, default ${DEFAULT_MINES})`)
         .setRequired(false)
         .setMinValue(1)
         .setMaxValue(MAX_MINES),
@@ -243,6 +273,9 @@ const command: SlashCommand = {
       minePositions.add(Math.floor(Math.random() * GRID));
     }
 
+    const winRate = houseWinRateForBet(bet);
+    const willHouseWin = Math.random() < winRate;
+
     const state: MinesState = {
       bet,
       mines: minesOpt,
@@ -250,7 +283,7 @@ const command: SlashCommand = {
       exploded: false,
       cashedOut: false,
       timedOut: false,
-      willHouseWin: houseShouldWin(bet),
+      willHouseWin,
       mineTiles: minePositions,
       safeTiles: new Set(),
     };
@@ -267,7 +300,7 @@ const command: SlashCommand = {
     } catch (err) {
       console.error("[mines] failed to send game message:", err);
       await refundAndAbort(
-        "Couldn't start the game (Discord error). Your bet was refunded.",
+        "Couldn't start the game. Your bet was refunded — please try again.",
       );
       return;
     }
@@ -297,6 +330,7 @@ const command: SlashCommand = {
           });
           return;
         }
+
         state.cashedOut = true;
         const mult = multiplierFor(state.revealed.size, state.mines);
         const payout = BigInt(Math.floor(Number(state.bet) * mult));
@@ -317,7 +351,6 @@ const command: SlashCommand = {
           won: payout > state.bet,
           detail: `cashout ${state.revealed.size} picks, ${state.mines} mines, x${mult.toFixed(2)}`,
         });
-        // Reveal remaining mines for visual effect.
         let safety = 0;
         while (state.mineTiles.size < state.mines && safety++ < 200) {
           const candidate = Math.floor(Math.random() * GRID);
@@ -351,40 +384,15 @@ const command: SlashCommand = {
         return;
       }
 
-      // ── Survival logic ────────────────────────────────────────────────
-      // Standard 5x5 mines with one twist: when this round is pre-flagged
-      // as "house wins" AND the live rigging bias is above zero, the game
-      // can secretly relocate one of the existing pre-placed mines onto
-      // the clicked safe tile. The mine COUNT is preserved (remove one,
-      // add one) so the displayed mine total never lies.
-      //
-      // First click is always safe (regular minesweeper rule), so the
-      // earliest a rig can fire is the player's second click.
-      const isFirstClick = state.revealed.size === 0;
-      const rig = riggingBias(state.bet);
+      // ── Survival logic ─────────────────────────────────────────────────────
+      const currentMult = multiplierFor(state.revealed.size, state.mines);
+      const ceilingBust = currentMult >= AUTO_BUST_MULT;
+      const rig = liveRig(state);
 
       let survive: boolean;
-      if (isFirstClick) {
-        if (state.mineTiles.has(idx)) {
-          // Move the unlucky mine to a random other tile.
-          state.mineTiles.delete(idx);
-          const candidates: number[] = [];
-          for (let i = 0; i < GRID; i++) {
-            if (i !== idx && !state.mineTiles.has(i)) candidates.push(i);
-          }
-          if (candidates.length > 0) {
-            const swapTo =
-              candidates[Math.floor(Math.random() * candidates.length)]!;
-            state.mineTiles.add(swapTo);
-          }
-        }
-        survive = true;
-      } else if (state.mineTiles.has(idx)) {
-        // Hit one of the real pre-placed mines.
+      if (state.mineTiles.has(idx)) {
         survive = false;
-      } else if (state.willHouseWin && rig > 0 && Math.random() < rig) {
-        // Rigged round: relocate one of the existing mines onto this
-        // tile so the count stays exactly `state.mines`.
+      } else if (ceilingBust || Math.random() < rig) {
         const movable: number[] = [];
         for (const m of state.mineTiles) {
           if (!state.revealed.has(m)) movable.push(m);
@@ -412,6 +420,8 @@ const command: SlashCommand = {
             picks: state.revealed.size,
             mines: state.mines,
             blewUp: idx,
+            rig,
+            ceilingBust,
           },
         });
         await logGamble({
@@ -420,9 +430,8 @@ const command: SlashCommand = {
           bet: state.bet,
           payout: 0n,
           won: false,
-          detail: `boom on tile ${idx} after ${state.revealed.size} picks`,
+          detail: `boom on tile ${idx} after ${state.revealed.size} picks (rig ${(rig * 100).toFixed(0)}%${ceilingBust ? ", ceiling" : ""})`,
         });
-        // Bet was deducted at game start; fetch current balance to display.
         const currentUser = await getOrCreateUser(interaction.user.id);
         try {
           await btn.update({

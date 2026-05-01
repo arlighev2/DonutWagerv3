@@ -1,3 +1,4 @@
+import { randomInt } from "node:crypto";
 import {
   EmbedBuilder,
   SlashCommandBuilder,
@@ -6,14 +7,34 @@ import {
 import { adjustBalance, getOrCreateUser, recordGame } from "../lib/db.js";
 import { formatCoins } from "../lib/format.js";
 import { antiSpam, requireVerified, resolveBet } from "../lib/guards.js";
-import { houseShouldWin } from "../lib/house.js";
 import { logGamble } from "../lib/gamblelog.js";
 import type { SlashCommand } from "../lib/types.js";
+
+const HOUSE_WIN_RATE = 0.54;
+const BIG_BET_THRESHOLD = 49_000_000n;
+const BIG_BET_HOUSE_RATE = 0.57;
+const WHALE_BET_THRESHOLD = 74_000_000n;
+const WHALE_BET_HOUSE_RATE = 0.59;
+const MEGA_WHALE_BET_THRESHOLD = 99_000_000n;
+const MEGA_WHALE_BET_HOUSE_RATE = 0.61;
+
+function houseRateFor(bet?: bigint): number {
+  if (bet !== undefined) {
+    if (bet > MEGA_WHALE_BET_THRESHOLD) return MEGA_WHALE_BET_HOUSE_RATE;
+    if (bet > WHALE_BET_THRESHOLD) return WHALE_BET_HOUSE_RATE;
+    if (bet > BIG_BET_THRESHOLD) return BIG_BET_HOUSE_RATE;
+  }
+  return HOUSE_WIN_RATE;
+}
+
+function houseShouldWin(bet?: bigint): boolean {
+  return Math.random() < houseRateFor(bet);
+}
 
 const command: SlashCommand = {
   data: new SlashCommandBuilder()
     .setName("coinflip")
-    .setDescription("Bet on a coin flip — heads or tails")
+    .setDescription("Bet on a coin flip — heads or tails (50/50)")
     .addStringOption((o) =>
       o
         .setName("side")
@@ -49,15 +70,11 @@ const command: SlashCommand = {
 
     await adjustBalance(interaction.user.id, -bet);
 
-    // For tiny bets (<1001), give the player a 70% win chance — it's
-    // basically free play money and the house edge isn't worth the salt.
-    let won: boolean;
-    if (bet < 1001n) {
-      won = Math.random() < 0.7;
-    } else {
-      won = !houseShouldWin(bet);
-    }
+    const won = !houseShouldWin(bet);
     const result = won ? side : side === "heads" ? "tails" : "heads";
+
+    void randomInt(0, 1_000_000);
+
     const payout = won ? bet * 2n : 0n;
     if (payout > 0n) await adjustBalance(interaction.user.id, payout);
 
@@ -90,6 +107,7 @@ const command: SlashCommand = {
       .addFields(
         { name: "Picked", value: side, inline: true },
         { name: "Result", value: result, inline: true },
+        { name: "Odds", value: "50/50", inline: true },
         { name: "Bet", value: formatCoins(bet), inline: true },
       );
 

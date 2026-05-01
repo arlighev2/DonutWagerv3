@@ -24,16 +24,21 @@ const ROWS = 4;
 // climbs above 0.5, `riggingBias` dials in the per-row swing.
 const HOUSE_EDGE_FACTOR = 0.95;
 
+// Baseline rig factor applied to every tower row, on every difficulty.
+// Shifts the player's per-row survival rate down by this much, e.g. a
+// 50/50 row becomes 40% survive / 60% house win.
+const RIG_FACTOR = 0.1;
+
 type Difficulty = "easy" | "medium" | "hard";
 
 // Each row has exactly 1 bomb. `cols` = tiles per row (so cols-1 are safe).
-// Easy = 1-of-3 (67% per row, smallest reward).
-// Medium = 1-of-2 (50/50, the default).
-// Hard = 1-of-4 (25% per row, biggest reward).
+// Easy   = 1 bomb of 4 tiles (3 safe, ~1.33x per row — smallest reward).
+// Medium = 1 bomb of 3 tiles (2 safe, 1.5x per row).
+// Hard   = 1 bomb of 2 tiles (1 safe, 50/50, 2x per row — biggest reward).
 const DIFFICULTY_COLS: Record<Difficulty, number> = {
-  easy: 3,
-  medium: 2,
-  hard: 4,
+  easy: 4,
+  medium: 3,
+  hard: 2,
 };
 
 interface TowersState {
@@ -51,9 +56,10 @@ interface TowersState {
 
 function multiplierFor(level: number, cols: number): number {
   if (level <= 0) return 1;
-  // Fair payout per cleared row is `cols` (1-of-cols safe). Apply the display
-  // edge once at the end so it doesn't compound row by row.
-  return Math.pow(cols, level) * HOUSE_EDGE_FACTOR;
+  // Fair payout per cleared row is `cols / (cols - 1)` because (cols - 1)
+  // of the tiles are safe and only 1 is a bomb. Apply the display edge
+  // once at the end so it doesn't compound row by row.
+  return Math.pow(cols / (cols - 1), level) * HOUSE_EDGE_FACTOR;
 }
 
 function survivalThreshold(
@@ -61,10 +67,13 @@ function survivalThreshold(
   willHouseWin: boolean,
   rig: number,
 ): number {
-  const fair = 1 / cols;
-  // At rig = 0 (HOUSE_WIN_RATE <= 0.5) every round is exactly fair.
-  // As rig ramps up, house-flagged rounds slide toward 0% survival and
-  // user-flagged rounds slide toward 100% survival.
+  // (cols - 1) of `cols` tiles are safe per row, shifted down by the
+  // baseline RIG_FACTOR so the house always has at least that much edge
+  // on every row of every difficulty (e.g. a 50/50 becomes 40% survive).
+  const fair = Math.max(0, (cols - 1) / cols - RIG_FACTOR);
+  // At rig = 0 (HOUSE_WIN_RATE <= 0.5) every round uses the rigged base
+  // rate above. As rig ramps up, house-flagged rounds slide toward 0%
+  // survival and user-flagged rounds slide toward 100% survival.
   if (willHouseWin) return fair * (1 - rig);
   return fair + (1 - fair) * rig;
 }
@@ -86,14 +95,17 @@ function buildRows(state: TowersState, gameOver: boolean) {
       const isUserTile = userPick === c;
 
       if (isCleared) {
-        // Row was cleared — user's pick was safe, the rest were bombs.
+        // Row was cleared — user's pick was safe. Of the remaining tiles,
+        // exactly one was the bomb and the rest were also safe.
         if (isUserTile) {
           btn.setLabel("💎").setStyle(ButtonStyle.Success).setDisabled(true);
-        } else {
+        } else if (isBomb) {
           btn.setLabel("💣").setStyle(ButtonStyle.Danger).setDisabled(true);
+        } else {
+          btn.setLabel("✅").setStyle(ButtonStyle.Success).setDisabled(true);
         }
       } else if (isFailedRow) {
-        // The row they died on — show their bomb, the safe tile, and others.
+        // The row they died on — user's tile is the bomb, the rest were safe.
         if (isUserTile) {
           btn.setLabel("💥").setStyle(ButtonStyle.Danger).setDisabled(true);
         } else if (isBomb) {
@@ -127,12 +139,12 @@ const command: SlashCommand = {
     .addStringOption((o) =>
       o
         .setName("difficulty")
-        .setDescription("Tiles per row (1 bomb each). Default: medium (50/50)")
+        .setDescription("Tiles per row (1 bomb each). Default: medium")
         .setRequired(false)
         .addChoices(
-          { name: "Easy — 1 bomb of 3 tiles (3x per level)", value: "easy" },
-          { name: "Medium — 1 bomb of 2 tiles, 50/50 (2x per level)", value: "medium" },
-          { name: "Hard — 1 bomb of 4 tiles (4x per level)", value: "hard" },
+          { name: "Easy — 1 bomb of 4 tiles (~1.33x per level)", value: "easy" },
+          { name: "Medium — 1 bomb of 3 tiles (1.5x per level)", value: "medium" },
+          { name: "Hard — 1 bomb of 2 tiles, 50/50 (2x per level)", value: "hard" },
         ),
     ),
   async execute(interaction: ChatInputCommandInteraction): Promise<void> {
@@ -216,7 +228,7 @@ const command: SlashCommand = {
           { name: "Bet", value: formatCoins(state.bet), inline: true },
           {
             name: "Difficulty",
-            value: `${state.difficulty} (1 safe of ${state.cols})`,
+            value: `${state.difficulty} (1 bomb of ${state.cols})`,
             inline: true,
           },
           {
@@ -324,16 +336,10 @@ const command: SlashCommand = {
       const survive = Math.random() < threshold;
 
       if (!survive) {
-        // Their pick is the bomb. Pick a different column to reveal as the
-        // safe tile so the user can see what they should have chosen.
-        const otherCols = Array.from({ length: state.cols }, (_, i) => i).filter(
-          (x) => x !== c,
-        );
-        const safeCol = otherCols[Math.floor(Math.random() * otherCols.length)]!;
-        const bombCols = Array.from({ length: state.cols }, (_, i) => i).filter(
-          (x) => x !== safeCol,
-        );
-        state.bombs.set(r, bombCols);
+        // Their pick is the bomb. With (cols - 1) safe tiles per row, the
+        // user's tile is the only bomb on this row — every other tile would
+        // have been safe.
+        state.bombs.set(r, [c]);
         state.picks[r] = c;
         state.failedRow = r;
         state.failed = true;
@@ -371,11 +377,14 @@ const command: SlashCommand = {
         return;
       }
 
+      // Survived — pick a random one of the *other* tiles to record as the
+      // (would-have-been) bomb for this row, since only 1 of cols is a bomb.
       state.picks[r] = c;
       const otherCols = Array.from({ length: state.cols }, (_, i) => i).filter(
         (x) => x !== c,
       );
-      state.bombs.set(r, otherCols);
+      const bombCol = otherCols[Math.floor(Math.random() * otherCols.length)]!;
+      state.bombs.set(r, [bombCol]);
       state.currentRow += 1;
 
       if (state.currentRow >= ROWS) {

@@ -1,21 +1,37 @@
- /**
+/**
  * House edge engine.
  *
- * Default house win share is ~65% / user 35%. For "whale" bets above
- * BIG_BET_THRESHOLD, the house win share jumps to BIG_BET_HOUSE_RATE so the
- * casino can't be drained by a few lucky max-bet rolls.
+ * Default house win share is ~58% / user 42%. For larger ("whale") bets the
+ * house win share scales up in tiers so the casino can't be drained by a
+ * few lucky max-bet rolls.
+ *
+ * Tiers:
+ *   bet  > 49,000,000  → 0.56
+ *   bet  > 74,000,000  → 0.62
+ *   bet  > 99,000,000  → 0.64
  *
  * All games consult `houseShouldWin(bet)` before resolving any randomized
  * outcome. Pass the bet (as bigint) so the rate can be tilted automatically.
  */
 
 export const HOUSE_WIN_RATE = 0.56;
-export const BIG_BET_THRESHOLD = 99_000_000n; // > 99m mil
-export const BIG_BET_HOUSE_RATE = 0.59;
+
+export const BIG_BET_THRESHOLD = 49_000_000n; // > 49m
+export const BIG_BET_HOUSE_RATE = 0.58;
+
+export const WHALE_BET_THRESHOLD = 74_000_000n; // > 74m
+export const WHALE_BET_HOUSE_RATE = 0.62;
+
+export const MEGA_WHALE_BET_THRESHOLD = 99_000_000n; // > 99m
+export const MEGA_WHALE_BET_HOUSE_RATE = 0.64;
 
 /** Effective house win rate for a given bet. */
 export function houseRateFor(bet?: bigint): number {
-  if (bet !== undefined && bet > BIG_BET_THRESHOLD) return BIG_BET_HOUSE_RATE;
+  if (bet !== undefined) {
+    if (bet > MEGA_WHALE_BET_THRESHOLD) return MEGA_WHALE_BET_HOUSE_RATE;
+    if (bet > WHALE_BET_THRESHOLD) return WHALE_BET_HOUSE_RATE;
+    if (bet > BIG_BET_THRESHOLD) return BIG_BET_HOUSE_RATE;
+  }
   return HOUSE_WIN_RATE;
 }
 
