@@ -158,7 +158,7 @@ export async function getInviteStats(discordId: string): Promise<InviteStats> {
   };
 }
 
-async function processInviteClaim(discordId: string): Promise<
+export async function processInviteClaim(discordId: string): Promise<
   | { ok: true; invitesUsed: number; coinsAwarded: bigint; claimNumber: number }
   | { ok: false; reason: string }
 > {

@@ -13,6 +13,8 @@ const SOURCE_LABEL: Record<string, string> = {
   coupon: "🎟️ Coupon",
   daily: "🎁 Daily",
   admin: "🛠️ Admin",
+  deposit: "📥 Deposit",
+  invite: "🎟️ Invite Reward",
   withdraw: "📤 Withdraw",
   irlwithdraw: "💵 IRL Sale",
 };
