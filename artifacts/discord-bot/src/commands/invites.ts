@@ -56,10 +56,9 @@ const command: SlashCommand = {
         { name: "⏳ Status", value: statusLine, inline: false },
         {
           name: "💰 Claimable Now",
-          value:
-            stats.validUnclaimed > 0
-              ? `${formatCoins(coinsNow)} (${stats.validUnclaimed} invites)`
-              : "—",
+          value: canClaim
+            ? `${formatCoins(coinsNow)} (${stats.validUnclaimed} invites)`
+            : `— (reach ${nextMin} valid invites to unlock)`,
           inline: false,
         },
       )
