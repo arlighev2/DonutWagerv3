@@ -113,6 +113,18 @@ export async function initSchema(): Promise<void> {
     );
     CREATE INDEX IF NOT EXISTS idx_invite_claims_user
       ON bot_invite_claims(discord_id);
+
+    CREATE TABLE IF NOT EXISTS bot_pending_deposits (
+      id BIGSERIAL PRIMARY KEY,
+      discord_id VARCHAR(32) NOT NULL,
+      channel_id VARCHAR(32) NOT NULL UNIQUE,
+      amount BIGINT NOT NULL,
+      status VARCHAR(16) NOT NULL DEFAULT 'pending',
+      created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+      resolved_at TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_pending_deposits_user
+      ON bot_pending_deposits(discord_id, status);
   `);
 }
 
@@ -609,6 +621,67 @@ export async function markPendingWithdrawalPaid(
        SET status = 'paid', resolved_at = NOW()
      WHERE id = $1::bigint AND status = 'pending'`,
     [id],
+  );
+  return (r.rowCount ?? 0) > 0;
+}
+
+export interface PendingDeposit {
+  id: string;
+  discord_id: string;
+  channel_id: string;
+  amount: string;
+  status: string;
+  created_at: Date;
+}
+
+export async function createPendingDeposit(params: {
+  discordId: string;
+  channelId: string;
+  amount: bigint;
+}): Promise<PendingDeposit | null> {
+  try {
+    const r = await pool.query<PendingDeposit>(
+      `INSERT INTO bot_pending_deposits (discord_id, channel_id, amount)
+         VALUES ($1, $2, $3)
+         RETURNING *`,
+      [params.discordId, params.channelId, params.amount.toString()],
+    );
+    return r.rows[0] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export async function getPendingDepositByDiscordId(
+  discordId: string,
+): Promise<PendingDeposit | null> {
+  const r = await pool.query<PendingDeposit>(
+    `SELECT * FROM bot_pending_deposits
+     WHERE discord_id = $1 AND status = 'pending'
+     ORDER BY created_at DESC LIMIT 1`,
+    [discordId],
+  );
+  return r.rows[0] ?? null;
+}
+
+export async function completePendingDeposit(id: string): Promise<boolean> {
+  const r = await pool.query(
+    `UPDATE bot_pending_deposits
+       SET status = 'completed', resolved_at = NOW()
+     WHERE id = $1::bigint AND status = 'pending'`,
+    [id],
+  );
+  return (r.rowCount ?? 0) > 0;
+}
+
+export async function cancelPendingDepositByChannel(
+  channelId: string,
+): Promise<boolean> {
+  const r = await pool.query(
+    `UPDATE bot_pending_deposits
+       SET status = 'cancelled', resolved_at = NOW()
+     WHERE channel_id = $1 AND status = 'pending'`,
+    [channelId],
   );
   return (r.rowCount ?? 0) > 0;
 }

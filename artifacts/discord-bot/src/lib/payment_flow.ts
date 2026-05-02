@@ -1,7 +1,9 @@
 import { EmbedBuilder, type Client, type Message } from "discord.js";
 import {
   adjustBalance,
+  completePendingDeposit,
   findUserByMinecraftUsername,
+  getPendingDepositByDiscordId,
   getOrCreateUser,
   recordBalanceEvent,
 } from "./db.js";
@@ -57,6 +59,14 @@ export async function handlePaymentMessage(
     return;
   }
 
+  const pendingDeposit = await getPendingDepositByDiscordId(user.discord_id);
+  if (!pendingDeposit) {
+    await send(
+      `❌ **${mcUsername}** (<@${user.discord_id}>) does not have an open deposit ticket. They need to open one via the casino panel before paying.`,
+    );
+    return;
+  }
+
   await getOrCreateUser(user.discord_id);
   const newBal = await adjustBalance(user.discord_id, coins);
   await recordBalanceEvent({
@@ -65,6 +75,7 @@ export async function handlePaymentMessage(
     source: "deposit",
     detail: `in-game payment`,
   });
+  await completePendingDeposit(pendingDeposit.id);
 
   console.log(
     `[payment] Credited ${formatCoins(coins)} to ${mcUsername} (<@${user.discord_id}>). New balance: ${formatCoins(newBal)}`,

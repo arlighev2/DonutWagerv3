@@ -5,7 +5,7 @@ import {
   type ChatInputCommandInteraction,
 } from "discord.js";
 import type { SlashCommand } from "../lib/types.js";
-import { getConfig } from "../lib/db.js";
+import { cancelPendingDepositByChannel, getConfig } from "../lib/db.js";
 import { isPaidTicketName, isTicketChannelName } from "../lib/tickets.js";
 
 const command: SlashCommand = {
@@ -72,6 +72,11 @@ const command: SlashCommand = {
         });
         return;
       }
+    }
+
+    // If it's a deposit ticket, cancel the pending deposit record.
+    if (name.startsWith("deposit-")) {
+      await cancelPendingDepositByChannel(interaction.channelId);
     }
 
     await interaction.reply({

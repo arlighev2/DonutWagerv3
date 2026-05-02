@@ -12,6 +12,7 @@ import {
 } from "discord.js";
 import {
   adjustBalance,
+  createPendingDeposit,
   createPendingWithdrawal,
   findUserByMinecraftUsername,
   getOrCreateUser,
@@ -451,11 +452,23 @@ export async function handlePanelModal(
       : `<@${interaction.user.id}>`;
 
     if (action === "deposit") {
+      await createPendingDeposit({
+        discordId: interaction.user.id,
+        channelId: ticket.channel.id,
+        amount,
+      });
+
+      const rawAmount = Number(amount).toString();
       const depositEmbed = new EmbedBuilder()
         .setColor(0x22c55e)
-        .setTitle("Deposit Ticket")
+        .setTitle("📥 Deposit Ticket")
         .setDescription(
-          `Welcome <@${interaction.user.id}>!\n\nAn admin will provide you with a username to pay in-game. The moment you send the payment, the bot will detect it and automatically add it to your balance.\n\n**Make sure to pay from the Minecraft account you verified.**`,
+          `Welcome <@${interaction.user.id}>!\n\n` +
+          `An admin will provide you with their Minecraft username. Once you have it, run this command in-game:\n\n` +
+          `\`\`\`/pay _____ ${rawAmount}\`\`\`` +
+          `Replace \`_____\` with the admin's username.\n\n` +
+          `The bot will automatically detect your payment and add it to your balance.\n` +
+          `**Make sure to pay from your verified account:** \`${user.minecraft_username}\``,
         )
         .addFields(
           {
@@ -464,7 +477,7 @@ export async function handlePanelModal(
             inline: true,
           },
           {
-            name: "IGN on file",
+            name: "Your IGN",
             value: `\`${user.minecraft_username}\``,
             inline: true,
           },
