@@ -120,47 +120,55 @@ export interface InviteStats {
   validUnclaimed: number;
   notVerified: number;
   leftServer: number;
+  claimedAndLeft: number;
   totalClaimed: number;
   claimCount: number;
 }
 
 export async function getInviteStats(discordId: string): Promise<InviteStats> {
-  const [totRes, leftRes, validRes, notVerRes, claimedRes, countRes] = await Promise.all([
-    pool.query<{ count: string }>(
-      `SELECT COUNT(*) AS count FROM bot_invite_members WHERE inviter_discord_id = $1`,
-      [discordId],
-    ),
-    pool.query<{ count: string }>(
-      `SELECT COUNT(*) AS count FROM bot_invite_members
-         WHERE inviter_discord_id = $1 AND left_at IS NOT NULL`,
-      [discordId],
-    ),
-    pool.query<{ count: string }>(
-      `SELECT COUNT(*) AS count FROM bot_invite_members
-         WHERE inviter_discord_id = $1
-           AND has_member_role = TRUE AND left_at IS NULL AND claimed = FALSE`,
-      [discordId],
-    ),
-    pool.query<{ count: string }>(
-      `SELECT COUNT(*) AS count FROM bot_invite_members
-         WHERE inviter_discord_id = $1
-           AND has_member_role = FALSE AND left_at IS NULL`,
-      [discordId],
-    ),
-    pool.query<{ total: string }>(
-      `SELECT COALESCE(SUM(invites_used), 0) AS total FROM bot_invite_claims WHERE discord_id = $1`,
-      [discordId],
-    ),
-    pool.query<{ count: string }>(
-      `SELECT COUNT(*) AS count FROM bot_invite_claims WHERE discord_id = $1`,
-      [discordId],
-    ),
-  ]);
+  const [totRes, leftRes, validRes, notVerRes, claimedLeftRes, claimedRes, countRes] =
+    await Promise.all([
+      pool.query<{ count: string }>(
+        `SELECT COUNT(*) AS count FROM bot_invite_members WHERE inviter_discord_id = $1`,
+        [discordId],
+      ),
+      pool.query<{ count: string }>(
+        `SELECT COUNT(*) AS count FROM bot_invite_members
+           WHERE inviter_discord_id = $1 AND left_at IS NOT NULL AND claimed = FALSE`,
+        [discordId],
+      ),
+      pool.query<{ count: string }>(
+        `SELECT COUNT(*) AS count FROM bot_invite_members
+           WHERE inviter_discord_id = $1
+             AND has_member_role = TRUE AND left_at IS NULL AND claimed = FALSE`,
+        [discordId],
+      ),
+      pool.query<{ count: string }>(
+        `SELECT COUNT(*) AS count FROM bot_invite_members
+           WHERE inviter_discord_id = $1
+             AND has_member_role = FALSE AND left_at IS NULL`,
+        [discordId],
+      ),
+      pool.query<{ count: string }>(
+        `SELECT COUNT(*) AS count FROM bot_invite_members
+           WHERE inviter_discord_id = $1 AND claimed = TRUE AND left_at IS NOT NULL`,
+        [discordId],
+      ),
+      pool.query<{ total: string }>(
+        `SELECT COALESCE(SUM(invites_used), 0) AS total FROM bot_invite_claims WHERE discord_id = $1`,
+        [discordId],
+      ),
+      pool.query<{ count: string }>(
+        `SELECT COUNT(*) AS count FROM bot_invite_claims WHERE discord_id = $1`,
+        [discordId],
+      ),
+    ]);
   return {
     totalInvited: parseInt(totRes.rows[0]?.count ?? "0"),
     leftServer: parseInt(leftRes.rows[0]?.count ?? "0"),
     validUnclaimed: parseInt(validRes.rows[0]?.count ?? "0"),
     notVerified: parseInt(notVerRes.rows[0]?.count ?? "0"),
+    claimedAndLeft: parseInt(claimedLeftRes.rows[0]?.count ?? "0"),
     totalClaimed: parseInt(claimedRes.rows[0]?.total ?? "0"),
     claimCount: parseInt(countRes.rows[0]?.count ?? "0"),
   };
@@ -212,12 +220,21 @@ export async function processInviteClaim(discordId: string): Promise<
     );
     const validCount = parseInt(validRes.rows[0]?.count ?? "0");
 
-    if (validCount < nextMin) {
+    const deductRes = await conn.query<{ count: string }>(
+      `SELECT COUNT(*) AS count FROM bot_invite_members
+         WHERE inviter_discord_id = $1 AND claimed = TRUE AND left_at IS NOT NULL`,
+      [discordId],
+    );
+    const deducted = parseInt(deductRes.rows[0]?.count ?? "0");
+    const effectiveValid = validCount - deducted;
+
+    if (effectiveValid < nextMin) {
       await conn.query("ROLLBACK");
-      return {
-        ok: false,
-        reason: `Need **${nextMin}** valid unclaimed invites — you have **${validCount}**.`,
-      };
+      const msg =
+        deducted > 0
+          ? `Net valid invites: **${effectiveValid}** (${validCount} valid − ${deducted} previously claimed who left). Need **${nextMin}**.`
+          : `Need **${nextMin}** valid unclaimed invites — you have **${validCount}**.`;
+      return { ok: false, reason: msg };
     }
 
     await conn.query(

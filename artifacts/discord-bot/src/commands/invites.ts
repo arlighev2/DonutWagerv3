@@ -23,45 +23,60 @@ const command: SlashCommand = {
 
     const stats = await getInviteStats(interaction.user.id);
     const nextMin = getNextClaimMin(stats.claimCount);
-    const canClaim = stats.validUnclaimed >= nextMin;
-    const coinsNow = COINS_PER_INVITE * BigInt(stats.validUnclaimed);
-    const needMore = nextMin - stats.validUnclaimed;
+    const netValid = stats.validUnclaimed - stats.claimedAndLeft;
+    const canClaim = netValid >= nextMin;
+    const coinsNow = COINS_PER_INVITE * BigInt(Math.max(0, netValid));
+    const needMore = nextMin - netValid;
 
     const statusLine = canClaim
       ? "✅ Ready to claim!"
       : `❌ Need ${needMore} more valid invite${needMore !== 1 ? "s" : ""}`;
 
+    const netValidDisplay =
+      stats.claimedAndLeft > 0
+        ? `${netValid} (${stats.validUnclaimed} − ${stats.claimedAndLeft} deducted)`
+        : `${stats.validUnclaimed}`;
+
+    const fields: { name: string; value: string; inline: boolean }[] = [
+      { name: "📨 Total Invited", value: `${stats.totalInvited}`, inline: true },
+      { name: "✅ Valid Unclaimed", value: netValidDisplay, inline: true },
+      { name: "❌ Left Server", value: `${stats.leftServer}`, inline: true },
+      { name: "⏳ Not Verified", value: `${stats.notVerified}`, inline: true },
+      {
+        name: "🏆 Total Claimed",
+        value: `${stats.totalClaimed} invite${stats.totalClaimed !== 1 ? "s" : ""}`,
+        inline: true,
+      },
+      {
+        name: "🎯 Next Claim Needs",
+        value: `${nextMin} net valid`,
+        inline: true,
+      },
+    ];
+
+    if (stats.claimedAndLeft > 0) {
+      fields.push({
+        name: "⚠️ Deducted (claimed, now left)",
+        value: `-${stats.claimedAndLeft} — earn ${stats.claimedAndLeft} extra invite${stats.claimedAndLeft !== 1 ? "s" : ""} to offset`,
+        inline: false,
+      });
+    }
+
+    fields.push(
+      { name: "📊 Status", value: statusLine, inline: false },
+      {
+        name: "💰 Claimable Now",
+        value: canClaim
+          ? `${formatCoins(coinsNow)} (${netValid} invites)`
+          : `— (reach ${nextMin} net valid invites to unlock)`,
+        inline: false,
+      },
+    );
+
     const embed = new EmbedBuilder()
       .setColor(canClaim ? 0x22c55e : 0xfacc15)
       .setTitle("🎟️ Your Invite Stats")
-      .addFields(
-        { name: "📨 Total Invited", value: `${stats.totalInvited}`, inline: true },
-        { name: "✅ Valid Unclaimed", value: `${stats.validUnclaimed}`, inline: true },
-        { name: "❌ Left Server", value: `${stats.leftServer}`, inline: true },
-        {
-          name: "⏳ Not Verified",
-          value: `${stats.notVerified}`,
-          inline: true,
-        },
-        {
-          name: "🏆 Total Claimed",
-          value: `${stats.totalClaimed} invite${stats.totalClaimed !== 1 ? "s" : ""}`,
-          inline: true,
-        },
-        {
-          name: "🎯 Next Claim Needs",
-          value: `${nextMin} valid unclaimed`,
-          inline: true,
-        },
-        { name: "⏳ Status", value: statusLine, inline: false },
-        {
-          name: "💰 Claimable Now",
-          value: canClaim
-            ? `${formatCoins(coinsNow)} (${stats.validUnclaimed} invites)`
-            : `— (reach ${nextMin} valid invites to unlock)`,
-          inline: false,
-        },
-      )
+      .addFields(...fields)
       .setFooter({ text: "Not Verified = joined but hasn't verified using double counter yet • Earn 10m per valid invite" });
 
     if (canClaim) {

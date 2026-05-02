@@ -84,18 +84,34 @@ const command: SlashCommand = {
       .setDescription(chunks[0]!.join("\n"))
       .addFields(
         { name: "📨 Total", value: `${stats.totalInvited}`, inline: true },
-        { name: "✅ Valid Unclaimed", value: `${stats.validUnclaimed}`, inline: true },
+        {
+          name: "✅ Valid Unclaimed",
+          value:
+            stats.claimedAndLeft > 0
+              ? `${stats.validUnclaimed - stats.claimedAndLeft} (${stats.validUnclaimed} − ${stats.claimedAndLeft} deducted)`
+              : `${stats.validUnclaimed}`,
+          inline: true,
+        },
         { name: "⏳ Not Verified", value: `${stats.notVerified}`, inline: true },
         { name: "❌ Left", value: `${stats.leftServer}`, inline: true },
         { name: "🏆 Total Claimed", value: `${stats.totalClaimed}`, inline: true },
+        ...(stats.claimedAndLeft > 0
+          ? [
+              {
+                name: "⚠️ Deducted",
+                value: `-${stats.claimedAndLeft} (claimed, now left)`,
+                inline: true,
+              },
+            ]
+          : []),
         {
           name: "🎯 Next Claim Needs",
-          value: `${nextMin} valid unclaimed`,
+          value: `${nextMin} net valid`,
           inline: true,
         },
       )
       .setFooter({
-        text: "✅ Valid  ⏳ Not Verified  ❌ Left  🏆 Claimed",
+        text: "✅ Valid  ⏳ Not Verified  ❌ Left  🏆 Claimed  ⚠️ Deducted",
       });
 
     const embeds = [firstEmbed];
