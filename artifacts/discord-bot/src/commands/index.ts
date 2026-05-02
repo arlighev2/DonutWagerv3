@@ -19,8 +19,10 @@ import mines from "./mines.js";
 import towers from "./towers.js";
 import provablyfair from "./provablyfair.js";
 import resethash from "./resethash.js";
+import uptime from "./uptime.js";
 
 export const commands: SlashCommand[] = [
+  uptime,
   invites,
   invited,
   balance,
