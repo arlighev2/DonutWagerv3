@@ -66,8 +66,8 @@ const command: SlashCommand = {
       const logChannel = await interaction.client.channels.fetch(
         DEPOSIT_LOG_CHANNEL_ID,
       );
-      if (logChannel?.isTextBased()) {
-        await logChannel.send({ embeds: [embed] });
+      if (logChannel?.isTextBased() && "send" in logChannel) {
+        await (logChannel as { send: (opts: unknown) => Promise<unknown> }).send({ embeds: [embed] });
       }
     } catch {
       // Channel unreachable — deposit still went through.

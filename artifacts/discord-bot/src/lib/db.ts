@@ -378,6 +378,7 @@ export type BalanceSource =
   | "coupon"
   | "daily"
   | "admin"
+  | "deposit"
   | "withdraw"
   | "irlwithdraw";
 
