@@ -9,9 +9,11 @@ import {
 import {
   adjustBalance,
   findUserByMinecraftUsername,
+  getConfig,
   getOrCreateUser,
   getPendingWithdrawalByChannel,
   markPendingWithdrawalPaid,
+  pool,
   recordBalanceEvent,
   resetUserStats,
   setBalance,
@@ -20,7 +22,6 @@ import {
 } from "../lib/db.js";
 import { formatCoins, parseAmount } from "../lib/format.js";
 import type { SlashCommand } from "../lib/types.js";
-import { getConfig } from "../lib/db.js";
 import { isOwner, isWithdrawStaff } from "../lib/permissions.js";
 import {
   PAID_TICKET_PREFIX,
@@ -211,6 +212,22 @@ const command: SlashCommand = {
             .addUserOption((o) =>
               o.setName("user").setDescription("User to pay").setRequired(true),
             ),
+        )
+        .addSubcommand((sc) =>
+          sc
+            .setName("add")
+            .setDescription("(Testing) Manually add verified invite credits to a user")
+            .addUserOption((o) =>
+              o.setName("user").setDescription("User to credit").setRequired(true),
+            )
+            .addIntegerOption((o) =>
+              o
+                .setName("amount")
+                .setDescription("Number of fake verified invites to add")
+                .setMinValue(1)
+                .setMaxValue(50)
+                .setRequired(true),
+            ),
         ),
     ),
 
@@ -275,6 +292,37 @@ const command: SlashCommand = {
           }
         }
       }
+
+      if (sub === "add") {
+        const target = interaction.options.getUser("user", true);
+        const amount = interaction.options.getInteger("amount", true);
+        await interaction.deferReply({ ephemeral: true });
+
+        const now = Date.now();
+        for (let i = 0; i < amount; i++) {
+          const fakeId = `test_${now}_${i}`;
+          await pool.query(
+            `INSERT INTO bot_invite_members
+               (invitee_discord_id, inviter_discord_id, invite_code, has_member_role)
+             VALUES ($1, $2, $3, TRUE)
+             ON CONFLICT (invitee_discord_id) DO NOTHING`,
+            [fakeId, target.id, "admin-test"],
+          );
+        }
+
+        const stats = await getInviteStats(target.id);
+        await interaction.editReply({
+          content: [
+            `✅ Added **${amount}** test invite(s) for <@${target.id}>.`,
+            ``,
+            `**Updated stats:**`,
+            `• Valid unclaimed: **${stats.validUnclaimed}**`,
+            `• Not verified: **${stats.notVerified}**`,
+            `• Past claims: **${stats.claimCount}**`,
+          ].join("\n"),
+        });
+      }
+
       return;
     }
 
@@ -323,6 +371,7 @@ const command: SlashCommand = {
           "`/admin resetstats user` — wipe balance + game stats",
           "`/admin forceverify user minecraft` — force-link a Discord user to a Minecraft name",
           "`/admin invite pay user` — pay out a user's pending invite reward",
+          "`/admin invite add amount user` — (testing) add fake verified invites to a user",
           "`/admin setmodrole role` — set the mod role",
           "`/admin setcategory kind category` — set a ticket category",
           "`/admin config` — show current bot config",

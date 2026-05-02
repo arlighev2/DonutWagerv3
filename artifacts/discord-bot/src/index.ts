@@ -255,7 +255,7 @@ async function main(): Promise<void> {
   await initSchema();
 
   const client = new Client({
-    intents: [GatewayIntentBits.Guilds],
+    intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers],
   });
   setLogClient(client);
 
