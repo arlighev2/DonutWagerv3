@@ -40,6 +40,10 @@ import {
   handleMemberUpdate,
   initInviteCache,
 } from "./lib/invite_flow.js";
+import {
+  PAYMENT_CHANNEL_ID,
+  handlePaymentMessage,
+} from "./lib/payment_flow.js";
 
 // One-time auto-post target for the casino panel embed.
 const DEFAULT_PANEL_CHANNEL_ID = "1498881450643296400";
@@ -255,7 +259,12 @@ async function main(): Promise<void> {
   await initSchema();
 
   const client = new Client({
-    intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers],
+    intents: [
+      GatewayIntentBits.Guilds,
+      GatewayIntentBits.GuildMembers,
+      GatewayIntentBits.GuildMessages,
+      GatewayIntentBits.MessageContent,
+    ],
   });
   setLogClient(client);
 
@@ -293,6 +302,14 @@ async function main(): Promise<void> {
       newMember as GuildMember,
     ).catch((err) => {
       console.error("[bot] GuildMemberUpdate handler failed:", err);
+    });
+  });
+
+  client.on(Events.MessageCreate, (message) => {
+    if (message.channelId !== PAYMENT_CHANNEL_ID) return;
+    if (!client.isReady()) return;
+    void handlePaymentMessage(message, client).catch((err) => {
+      console.error("[bot] PaymentMessage handler failed:", err);
     });
   });
 

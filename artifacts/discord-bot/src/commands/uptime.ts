@@ -39,7 +39,7 @@ const command: SlashCommand = {
 
     const embed = new EmbedBuilder()
       .setColor(0x22c55e)
-      .setTitle("🤖 Bot Uptime")
+      .setTitle("Bot Uptime")
       .addFields(
         { name: "Uptime", value: formatUptime(uptime), inline: true },
         { name: "Started", value: `<t:${startedAt}:R>`, inline: true },
