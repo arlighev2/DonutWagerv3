@@ -99,12 +99,9 @@ export function buildPanelMessage(): {
       .setEmoji("💰")
       .setStyle(ButtonStyle.Primary),
     new ButtonBuilder()
-      .setCustomId(`${PANEL_BTN_PREFIX}:verify_java`)
-      .setLabel("Verify (Java)")
-      .setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder()
-      .setCustomId(`${PANEL_BTN_PREFIX}:verify_bedrock`)
-      .setLabel("Verify (Bedrock)")
+      .setCustomId(`${PANEL_BTN_PREFIX}:settings`)
+      .setLabel("Settings")
+      .setEmoji("⚙️")
       .setStyle(ButtonStyle.Secondary),
   );
 
@@ -172,6 +169,25 @@ export async function handlePanelButton(
     return;
   }
 
+  if (action === "settings") {
+    const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`${PANEL_BTN_PREFIX}:verify_java`)
+        .setLabel("Java Edition")
+        .setStyle(ButtonStyle.Primary),
+      new ButtonBuilder()
+        .setCustomId(`${PANEL_BTN_PREFIX}:verify_bedrock`)
+        .setLabel("Bedrock Edition")
+        .setStyle(ButtonStyle.Secondary),
+    );
+    await interaction.reply({
+      content: "**Which platform are you on?**\nPick your edition to link your Minecraft username.",
+      components: [row],
+      ephemeral: true,
+    });
+    return;
+  }
+
   if (action === "verify_java") {
     await interaction.showModal(ignModal("java"));
     return;
@@ -187,7 +203,7 @@ export async function handlePanelButton(
     if (!user.verified || !user.minecraft_username) {
       await interaction.reply({
         content:
-          "You need to verify your Minecraft account first. Click **☕ Verify (Java)** or **🎮 Verify (Bedrock)** above.",
+          "You need to set your Minecraft username first. Click **⚙️ Settings** on the panel.",
         ephemeral: true,
       });
       return;
@@ -401,7 +417,7 @@ export async function handlePanelModal(
     if (!user.verified || !user.minecraft_username) {
       await interaction.editReply({
         content:
-          "You need to verify your Minecraft account first. Click **☕ Verify (Java)** or **🎮 Verify (Bedrock)** on the panel.",
+          "You need to set your Minecraft username first. Click **⚙️ Settings** on the panel.",
       });
       return;
     }
