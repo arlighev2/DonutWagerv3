@@ -77,7 +77,6 @@ export function buildPanelMessage(): {
         "",
         "**Limits:** 10k – ∞ per bet",
         "Use `/balance` to check your wallet.",
-        "### More commands with /help",
       ].join("\n"),
     )
     .setFooter({ text: "Click a button below to get started." });
