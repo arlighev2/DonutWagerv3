@@ -8,7 +8,7 @@ import {
   type GuildMember,
   type PartialGuildMember,
 } from "discord.js";
-import { pool, getOrCreateUser } from "./db.js";
+import { pool, getOrCreateUser, setConfig, getConfig, deleteConfig } from "./db.js";
 import { formatCoins } from "./format.js";
 import { createTicketChannel } from "./tickets.js";
 import { isMod } from "./permissions.js";
@@ -277,6 +277,49 @@ export async function processInviteClaim(discordId: string): Promise<
   }
 }
 
+const DEPOSIT_LOG_CHANNEL_IDS = ["1498419875021066240", "1498440931026927817"];
+
+interface PendingClaim {
+  inviteeIds: string[];
+  invitesUsed: number;
+  claimNumber: number;
+}
+
+async function finalizeClaim(
+  discordId: string,
+  invitesUsed: number,
+  claimNumber: number,
+): Promise<bigint> {
+  const coinsAwarded = COINS_PER_INVITE * BigInt(invitesUsed);
+  const conn = await pool.connect();
+  try {
+    await conn.query("BEGIN");
+    await conn.query(
+      `INSERT INTO bot_users (discord_id) VALUES ($1) ON CONFLICT DO NOTHING`,
+      [discordId],
+    );
+    await conn.query(
+      `UPDATE bot_users SET balance = balance + $2 WHERE discord_id = $1`,
+      [discordId, coinsAwarded.toString()],
+    );
+    await conn.query(
+      `INSERT INTO bot_balance_ledger (discord_id, delta, source, detail) VALUES ($1, $2, 'invite', $3)`,
+      [discordId, coinsAwarded.toString(), `Claim #${claimNumber} — ${invitesUsed} invites`],
+    );
+    await conn.query(
+      `INSERT INTO bot_invite_claims (discord_id, claim_number, invites_used, coins_awarded) VALUES ($1, $2, $3, $4)`,
+      [discordId, claimNumber, invitesUsed, coinsAwarded.toString()],
+    );
+    await conn.query("COMMIT");
+    return coinsAwarded;
+  } catch (err) {
+    await conn.query("ROLLBACK").catch(() => {});
+    throw err;
+  } finally {
+    conn.release();
+  }
+}
+
 export async function handleInviteButton(
   interaction: ButtonInteraction,
 ): Promise<void> {
@@ -304,26 +347,57 @@ export async function handleInviteButton(
 
     const stats = await getInviteStats(interaction.user.id);
     const nextMin = getNextClaimMin(stats.claimCount);
-    if (stats.validUnclaimed < nextMin) {
+    const netValid = stats.validUnclaimed - stats.claimedAndLeft;
+    if (netValid < nextMin) {
       await interaction.editReply({
-        content: `You need at least **${nextMin}** valid unclaimed invites. You have **${stats.validUnclaimed}**.`,
+        content:
+          stats.claimedAndLeft > 0
+            ? `Net valid invites: **${netValid}** (${stats.validUnclaimed} valid − ${stats.claimedAndLeft} deducted). Need **${nextMin}**.`
+            : `You need at least **${nextMin}** valid unclaimed invites. You have **${stats.validUnclaimed}**.`,
       });
       return;
     }
 
-    const coinsToAward = COINS_PER_INVITE * BigInt(stats.validUnclaimed);
+    // Lock invites immediately so they can't be claimed twice
+    const lockRes = await pool.query<{ invitee_discord_id: string }>(
+      `UPDATE bot_invite_members SET claimed = TRUE
+         WHERE inviter_discord_id = $1
+           AND has_member_role = TRUE AND left_at IS NULL AND claimed = FALSE
+         RETURNING invitee_discord_id`,
+      [interaction.user.id],
+    );
+    const inviteeIds = lockRes.rows.map((r) => r.invitee_discord_id);
+    const invitesLocked = inviteeIds.length;
+    const claimNumber = stats.claimCount + 1;
+
+    if (invitesLocked === 0) {
+      await interaction.editReply({ content: "No valid invites to lock. Please try again." });
+      return;
+    }
+
+    // Store pending claim so approve/deny can finalize or revert
+    await setConfig(
+      `invite_pending_${interaction.user.id}`,
+      JSON.stringify({ inviteeIds, invitesUsed: invitesLocked, claimNumber } satisfies PendingClaim),
+    );
+
+    const coinsToAward = COINS_PER_INVITE * BigInt(invitesLocked);
     const ticket = await createTicketChannel({
       guild: interaction.guild,
       ownerId: interaction.user.id,
       ownerUsername: interaction.user.username,
       kind: "invite",
-      topic: `Invite claim — ${stats.validUnclaimed} invites`,
+      topic: `Invite claim — ${invitesLocked} invites`,
       allowAttachments: false,
     });
     if (!ticket) {
-      await interaction.editReply({
-        content: "Couldn't create the claim ticket. Contact a moderator.",
-      });
+      // Revert lock on ticket creation failure
+      await pool.query(
+        `UPDATE bot_invite_members SET claimed = FALSE WHERE invitee_discord_id = ANY($1)`,
+        [inviteeIds],
+      );
+      await deleteConfig(`invite_pending_${interaction.user.id}`);
+      await interaction.editReply({ content: "Couldn't create the claim ticket. Contact a moderator." });
       return;
     }
 
@@ -332,10 +406,13 @@ export async function handleInviteButton(
       .setTitle("🎟️ Invite Claim Request")
       .setDescription(`<@${interaction.user.id}> is requesting their invite reward.`)
       .addFields(
-        { name: "Valid Invites", value: `${stats.validUnclaimed}`, inline: true },
-        { name: "Coins to Award", value: formatCoins(coinsToAward), inline: true },
-        { name: "Claim #", value: `${stats.claimCount + 1}`, inline: true },
+        { name: "👤 User", value: `<@${interaction.user.id}>`, inline: true },
+        { name: "🎟️ Valid Invites", value: `${invitesLocked}`, inline: true },
+        { name: "💰 Coins to Award", value: formatCoins(coinsToAward), inline: true },
+        { name: "📋 Claim #", value: `${claimNumber}`, inline: true },
+        { name: "🔒 Status", value: "Invites locked — awaiting staff review", inline: false },
       )
+      .setTimestamp()
       .setFooter({ text: "Verify the invites are legitimate before approving." });
 
     const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
@@ -345,7 +422,7 @@ export async function handleInviteButton(
         .setStyle(ButtonStyle.Success),
       new ButtonBuilder()
         .setCustomId(`invite:deny:${interaction.user.id}`)
-        .setLabel("Deny")
+        .setLabel("Deny & Return")
         .setStyle(ButtonStyle.Danger),
     );
 
@@ -354,7 +431,7 @@ export async function handleInviteButton(
       : `<@${interaction.user.id}>`;
     await ticket.channel.send({ content: mention, embeds: [embed], components: [row] });
     await interaction.editReply({
-      content: `Claim ticket opened: <#${ticket.channel.id}>`,
+      content: `✅ Claim ticket opened: <#${ticket.channel.id}>\nYour **${invitesLocked}** invite${invitesLocked !== 1 ? "s" : ""} are locked pending staff review. Your \`/invites\` will show 0 until this is resolved.`,
     });
     return;
   }
@@ -366,27 +443,58 @@ export async function handleInviteButton(
       return;
     }
     await interaction.deferUpdate();
-    const result = await processInviteClaim(targetId);
-    if (!result.ok) {
-      await interaction.followUp({ content: `Could not process: ${result.reason}`, ephemeral: true });
+
+    const pendingRaw = await getConfig(`invite_pending_${targetId}`);
+    if (!pendingRaw) {
+      await interaction.followUp({
+        content: "No pending claim found for this user — it may have already been processed.",
+        ephemeral: true,
+      });
       return;
     }
-    const oldEmbed = interaction.message.embeds[0];
-    await interaction.editReply({
-      embeds: oldEmbed
-        ? [
-            EmbedBuilder.from(oldEmbed)
-              .setColor(0x22c55e)
-              .setTitle("✅ Invite Claim Approved")
-              .setFooter({ text: `Approved by ${interaction.user.tag}` }),
-          ]
-        : [],
-      components: [],
-    });
+    const pending = JSON.parse(pendingRaw) as PendingClaim;
+
+    let coinsAwarded: bigint;
+    try {
+      coinsAwarded = await finalizeClaim(targetId, pending.invitesUsed, pending.claimNumber);
+    } catch {
+      await interaction.followUp({ content: "Database error while processing payout. Contact a developer.", ephemeral: true });
+      return;
+    }
+    await deleteConfig(`invite_pending_${targetId}`);
+
+    const targetUser = await interaction.client.users.fetch(targetId).catch(() => null);
+    const approvedEmbed = new EmbedBuilder()
+      .setColor(0x22c55e)
+      .setTitle("✅ Invite Claim Approved")
+      .setDescription(`**${targetUser?.tag ?? targetId}**'s invite reward has been paid out.`)
+      .addFields(
+        { name: "👤 User", value: `<@${targetId}>`, inline: true },
+        { name: "🎟️ Invites Paid", value: `${pending.invitesUsed}`, inline: true },
+        { name: "💰 Coins Awarded", value: formatCoins(coinsAwarded), inline: true },
+        { name: "📋 Claim #", value: `${pending.claimNumber}`, inline: true },
+        { name: "✅ Approved By", value: `<@${interaction.user.id}>`, inline: true },
+      )
+      .setTimestamp()
+      .setFooter({ text: `Approved by ${interaction.user.tag}` });
+
+    await interaction.editReply({ embeds: [approvedEmbed], components: [] });
+
     if (interaction.channel && "send" in interaction.channel) {
       await interaction.channel.send(
-        `<@${targetId}> **${formatCoins(result.coinsAwarded)}** (${result.invitesUsed} invites × 10m) has been added to your balance! 🎉`,
+        `<@${targetId}> 🎉 **${formatCoins(coinsAwarded)}** (${pending.invitesUsed} invite${pending.invitesUsed !== 1 ? "s" : ""} × 10m) has been added to your balance!`,
       );
+    }
+
+    for (const channelId of DEPOSIT_LOG_CHANNEL_IDS) {
+      try {
+        const logChannel = await interaction.client.channels.fetch(channelId);
+        if (logChannel?.isTextBased() && "send" in logChannel) {
+          await (logChannel as { send: (opts: unknown) => Promise<unknown> }).send({ embeds: [approvedEmbed] });
+        }
+      } catch {
+        // channel unreachable — payout still went through
+      }
     }
     return;
   }
@@ -397,21 +505,36 @@ export async function handleInviteButton(
       await interaction.reply({ content: "Only staff can deny claims.", ephemeral: true });
       return;
     }
-    const oldEmbed = interaction.message.embeds[0];
-    await interaction.update({
-      embeds: oldEmbed
-        ? [
-            EmbedBuilder.from(oldEmbed)
-              .setColor(0xef4444)
-              .setTitle("❌ Invite Claim Denied")
-              .setFooter({ text: `Denied by ${interaction.user.tag}` }),
-          ]
-        : [],
-      components: [],
-    });
+    await interaction.deferUpdate();
+
+    const pendingRaw = await getConfig(`invite_pending_${targetId}`);
+    if (pendingRaw) {
+      const pending = JSON.parse(pendingRaw) as PendingClaim;
+      // Revert the locked invites so the user can try again
+      await pool.query(
+        `UPDATE bot_invite_members SET claimed = FALSE WHERE invitee_discord_id = ANY($1)`,
+        [pending.inviteeIds],
+      );
+      await deleteConfig(`invite_pending_${targetId}`);
+    }
+
+    const targetUser = await interaction.client.users.fetch(targetId).catch(() => null);
+    const deniedEmbed = new EmbedBuilder()
+      .setColor(0xef4444)
+      .setTitle("❌ Invite Claim Denied")
+      .setDescription(`**${targetUser?.tag ?? targetId}**'s invite claim was denied. Their invites have been returned.`)
+      .addFields(
+        { name: "👤 User", value: `<@${targetId}>`, inline: true },
+        { name: "❌ Denied By", value: `<@${interaction.user.id}>`, inline: true },
+      )
+      .setTimestamp()
+      .setFooter({ text: `Denied by ${interaction.user.tag}` });
+
+    await interaction.editReply({ embeds: [deniedEmbed], components: [] });
+
     if (interaction.channel && "send" in interaction.channel) {
       await interaction.channel.send(
-        `<@${targetId}> your invite claim was denied. Contact a moderator for help.`,
+        `<@${targetId}> your invite claim was denied and your invites have been returned. Contact a moderator for more info.`,
       );
     }
     return;

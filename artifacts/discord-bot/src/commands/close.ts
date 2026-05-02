@@ -43,6 +43,15 @@ const command: SlashCommand = {
       typeof member.permissions !== "string" &&
       member.permissions.has(PermissionFlagsBits.ManageChannels);
 
+    // Invite claim tickets are always staff-only to close — protects the audit trail.
+    if (name.startsWith("invite-") && !isMod && !hasManage) {
+      await interaction.reply({
+        content: "Invite claim tickets can only be closed by a moderator.",
+        ephemeral: true,
+      });
+      return;
+    }
+
     // Withdrawal tickets that have been paid out are mod-only to close so the
     // payout receipt + vouch trail can't be deleted by the customer.
     if (isPaidTicketName(name) && !isMod && !hasManage) {

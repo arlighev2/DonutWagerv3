@@ -628,3 +628,7 @@ export async function setConfig(key: string, value: string): Promise<void> {
     [key, value],
   );
 }
+
+export async function deleteConfig(key: string): Promise<void> {
+  await pool.query(`DELETE FROM bot_config WHERE key = $1`, [key]);
+}
