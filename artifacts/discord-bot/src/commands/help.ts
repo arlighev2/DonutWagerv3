@@ -16,7 +16,7 @@ const HOW_TO_PLAY: Record<
       "**Usage:** `/coinflip <bet> <heads|tails>`\n\n" +
       "Pick heads or tails. The bot flips a coin — if you called it right you win **2×** your bet, otherwise you lose your bet.\n\n" +
       "**Example:** `/coinflip 1mil heads` — bet 1,000,000 coins on heads.\n\n" +
-      "**Odds:** ~50/50 (house edge applies).",
+      "**Odds:** ~50/50",
   },
   dice: {
     title: "🎲 How to Play — Dice",
