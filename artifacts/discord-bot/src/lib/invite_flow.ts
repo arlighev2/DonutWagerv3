@@ -492,7 +492,7 @@ export async function handleInviteButton(
       );
     }
 
-    for (const channelId of [...DEPOSIT_LOG_CHANNEL_IDS, VOUCH_CHANNEL_ID]) {
+    for (const channelId of DEPOSIT_LOG_CHANNEL_IDS) {
       try {
         const logChannel = await interaction.client.channels.fetch(channelId);
         if (logChannel?.isTextBased() && "send" in logChannel) {
@@ -501,6 +501,28 @@ export async function handleInviteButton(
       } catch {
         // channel unreachable — payout still went through
       }
+    }
+
+    // Post a clean vouch to the vouch channel.
+    const vouchEmbed = new EmbedBuilder()
+      .setColor(0xfacc15)
+      .setTitle("🎟️ Invite Reward Vouch")
+      .addFields(
+        { name: "👤 User", value: `<@${targetId}>`, inline: true },
+        { name: "🎟️ Invites Paid", value: `${pending.invitesUsed}`, inline: true },
+        { name: "💰 Coins Rewarded", value: formatCoins(coinsAwarded), inline: true },
+        { name: "📋 Claim #", value: `${pending.claimNumber}`, inline: true },
+      )
+      .setTimestamp()
+      .setFooter({ text: `Approved by ${interaction.user.tag}` });
+
+    try {
+      const vouchChannel = await interaction.client.channels.fetch(VOUCH_CHANNEL_ID);
+      if (vouchChannel?.isTextBased() && "send" in vouchChannel) {
+        await (vouchChannel as { send: (opts: unknown) => Promise<unknown> }).send({ embeds: [vouchEmbed] });
+      }
+    } catch {
+      // vouch channel unreachable — payout still went through
     }
     return;
   }
