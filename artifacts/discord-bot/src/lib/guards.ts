@@ -45,9 +45,9 @@ export async function resolveBet(
     });
     return null;
   }
-  if (bet < 10n) {
+  if (bet < 10_000n) {
     await interaction.reply({
-      content: "Minimum bet is 10 coins.",
+      content: "Minimum bet is **10,000 coins** (10k).",
       ephemeral: true,
     });
     return null;
