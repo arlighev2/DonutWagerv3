@@ -1,5 +1,6 @@
 import type { SlashCommand } from "../lib/types.js";
 import invites from "./invites.js";
+import invited from "./invited.js";
 import balance from "./balance.js";
 import daily from "./daily.js";
 import pay from "./pay.js";
@@ -21,6 +22,7 @@ import resethash from "./resethash.js";
 
 export const commands: SlashCommand[] = [
   invites,
+  invited,
   balance,
   daily,
   pay,

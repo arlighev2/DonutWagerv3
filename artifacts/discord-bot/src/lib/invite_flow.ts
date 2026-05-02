@@ -118,13 +118,14 @@ export async function handleMemberUpdate(
 export interface InviteStats {
   totalInvited: number;
   validUnclaimed: number;
+  notVerified: number;
   leftServer: number;
   totalClaimed: number;
   claimCount: number;
 }
 
 export async function getInviteStats(discordId: string): Promise<InviteStats> {
-  const [totRes, leftRes, validRes, claimedRes, countRes] = await Promise.all([
+  const [totRes, leftRes, validRes, notVerRes, claimedRes, countRes] = await Promise.all([
     pool.query<{ count: string }>(
       `SELECT COUNT(*) AS count FROM bot_invite_members WHERE inviter_discord_id = $1`,
       [discordId],
@@ -140,6 +141,12 @@ export async function getInviteStats(discordId: string): Promise<InviteStats> {
            AND has_member_role = TRUE AND left_at IS NULL AND claimed = FALSE`,
       [discordId],
     ),
+    pool.query<{ count: string }>(
+      `SELECT COUNT(*) AS count FROM bot_invite_members
+         WHERE inviter_discord_id = $1
+           AND has_member_role = FALSE AND left_at IS NULL`,
+      [discordId],
+    ),
     pool.query<{ total: string }>(
       `SELECT COALESCE(SUM(invites_used), 0) AS total FROM bot_invite_claims WHERE discord_id = $1`,
       [discordId],
@@ -153,9 +160,30 @@ export async function getInviteStats(discordId: string): Promise<InviteStats> {
     totalInvited: parseInt(totRes.rows[0]?.count ?? "0"),
     leftServer: parseInt(leftRes.rows[0]?.count ?? "0"),
     validUnclaimed: parseInt(validRes.rows[0]?.count ?? "0"),
+    notVerified: parseInt(notVerRes.rows[0]?.count ?? "0"),
     totalClaimed: parseInt(claimedRes.rows[0]?.total ?? "0"),
     claimCount: parseInt(countRes.rows[0]?.count ?? "0"),
   };
+}
+
+export interface InviteMemberRow {
+  invitee_discord_id: string;
+  invite_code: string | null;
+  joined_at: Date;
+  left_at: Date | null;
+  has_member_role: boolean;
+  claimed: boolean;
+}
+
+export async function getInviteList(discordId: string): Promise<InviteMemberRow[]> {
+  const r = await pool.query<InviteMemberRow>(
+    `SELECT invitee_discord_id, invite_code, joined_at, left_at, has_member_role, claimed
+       FROM bot_invite_members
+       WHERE inviter_discord_id = $1
+       ORDER BY joined_at DESC`,
+    [discordId],
+  );
+  return r.rows;
 }
 
 export async function processInviteClaim(discordId: string): Promise<

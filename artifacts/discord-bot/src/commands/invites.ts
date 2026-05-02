@@ -39,6 +39,11 @@ const command: SlashCommand = {
         { name: "✅ Valid Unclaimed", value: `${stats.validUnclaimed}`, inline: true },
         { name: "❌ Left Server", value: `${stats.leftServer}`, inline: true },
         {
+          name: "⏳ Not Verified",
+          value: `${stats.notVerified}`,
+          inline: true,
+        },
+        {
           name: "🏆 Total Claimed",
           value: `${stats.totalClaimed} invite${stats.totalClaimed !== 1 ? "s" : ""}`,
           inline: true,
@@ -48,7 +53,7 @@ const command: SlashCommand = {
           value: `${nextMin} valid unclaimed`,
           inline: true,
         },
-        { name: "⏳ Status", value: statusLine, inline: true },
+        { name: "⏳ Status", value: statusLine, inline: false },
         {
           name: "💰 Claimable Now",
           value:
@@ -58,7 +63,7 @@ const command: SlashCommand = {
           inline: false,
         },
       )
-      .setFooter({ text: "Earn 10m per valid invite • Invite your friends!" });
+      .setFooter({ text: "Not Verified = joined but hasn't verified in-game yet • Earn 10m per valid invite" });
 
     if (canClaim) {
       const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
