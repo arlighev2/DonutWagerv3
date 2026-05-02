@@ -35,11 +35,7 @@ import {
 } from "../lib/gamblelog.js";
 import { CATEGORY_CONFIG_KEYS } from "../lib/tickets.js";
 import { buildPanelMessage } from "../lib/panel_flow.js";
-import {
-  getInviteStats,
-  processInviteClaim,
-  COINS_PER_INVITE,
-} from "../lib/invite_flow.js";
+import { getInviteStats } from "../lib/invite_flow.js";
 
 const DEPOSIT_LOG_CHANNEL_IDS = ["1498419875021066240", "1498440931026927817"];
 
@@ -207,14 +203,6 @@ const command: SlashCommand = {
         .setDescription("Invite reward management")
         .addSubcommand((sc) =>
           sc
-            .setName("pay")
-            .setDescription("Review and pay out a user's pending invite reward")
-            .addUserOption((o) =>
-              o.setName("user").setDescription("User to pay").setRequired(true),
-            ),
-        )
-        .addSubcommand((sc) =>
-          sc
             .setName("add")
             .setDescription("(Testing) Manually add verified invite credits to a user")
             .addUserOption((o) =>
@@ -243,56 +231,6 @@ const command: SlashCommand = {
         await interaction.reply({ content: "Bot owner only.", ephemeral: true });
         return;
       }
-      if (sub === "pay") {
-        const target = interaction.options.getUser("user", true);
-        await interaction.deferReply({ ephemeral: true });
-
-        const stats = await getInviteStats(target.id);
-        const result = await processInviteClaim(target.id);
-
-        if (!result.ok) {
-          await interaction.editReply({
-            content: [
-              `Cannot pay **${target.tag}**'s invite reward.`,
-              `> ${result.reason}`,
-              ``,
-              `**Current stats:**`,
-              `• Valid unclaimed: **${stats.validUnclaimed}**`,
-              `• Left server: **${stats.leftServer}**`,
-              `• Past claims: **${stats.claimCount}**`,
-            ].join("\n"),
-          });
-          return;
-        }
-
-        const embed = new EmbedBuilder()
-          .setColor(0xfacc15)
-          .setTitle("🎟️ Invite Reward Paid")
-          .addFields(
-            { name: "User", value: `<@${target.id}>`, inline: true },
-            { name: "Invites Claimed", value: `${result.invitesUsed}`, inline: true },
-            { name: "Rate", value: `${formatCoins(COINS_PER_INVITE)} / invite`, inline: true },
-            { name: "Total Awarded", value: formatCoins(result.coinsAwarded), inline: true },
-            { name: "Claim #", value: `${result.claimNumber}`, inline: true },
-            { name: "Paid By", value: `<@${interaction.user.id}>`, inline: true },
-          )
-          .setTimestamp()
-          .setFooter({ text: `Paid by ${interaction.user.tag}` });
-
-        await interaction.editReply({ embeds: [embed] });
-
-        for (const channelId of DEPOSIT_LOG_CHANNEL_IDS) {
-          try {
-            const logChannel = await interaction.client.channels.fetch(channelId);
-            if (logChannel?.isTextBased() && "send" in logChannel) {
-              await (logChannel as { send: (opts: unknown) => Promise<unknown> }).send({ embeds: [embed] });
-            }
-          } catch {
-            // channel unreachable — payout still went through
-          }
-        }
-      }
-
       if (sub === "add") {
         const target = interaction.options.getUser("user", true);
         const amount = interaction.options.getInteger("amount", true);
@@ -370,7 +308,6 @@ const command: SlashCommand = {
           "`/admin setbalance user amount` — set a user's balance",
           "`/admin resetstats user` — wipe balance + game stats",
           "`/admin forceverify user minecraft` — force-link a Discord user to a Minecraft name",
-          "`/admin invite pay user` — pay out a user's pending invite reward",
           "`/admin invite add amount user` — (testing) add fake verified invites to a user",
           "`/admin setmodrole role` — set the mod role",
           "`/admin setcategory kind category` — set a ticket category",
