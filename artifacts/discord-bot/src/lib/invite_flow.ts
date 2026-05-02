@@ -8,7 +8,7 @@ import {
   type GuildMember,
   type PartialGuildMember,
 } from "discord.js";
-import { pool } from "./db.js";
+import { pool, getOrCreateUser } from "./db.js";
 import { formatCoins } from "./format.js";
 import { createTicketChannel } from "./tickets.js";
 import { isMod } from "./permissions.js";
@@ -202,10 +202,12 @@ export async function processInviteClaim(discordId: string): Promise<
     const nextMin = getNextClaimMin(claimCount);
 
     const validRes = await conn.query<{ count: string }>(
-      `SELECT COUNT(*) AS count FROM bot_invite_members
-         WHERE inviter_discord_id = $1
-           AND has_member_role = TRUE AND left_at IS NULL AND claimed = FALSE
-         FOR UPDATE`,
+      `SELECT COUNT(*) AS count FROM (
+         SELECT invitee_discord_id FROM bot_invite_members
+           WHERE inviter_discord_id = $1
+             AND has_member_role = TRUE AND left_at IS NULL AND claimed = FALSE
+           FOR UPDATE
+       ) sub`,
       [discordId],
     );
     const validCount = parseInt(validRes.rows[0]?.count ?? "0");
@@ -272,6 +274,16 @@ export async function handleInviteButton(
       return;
     }
     await interaction.deferReply({ ephemeral: true });
+
+    const claimUser = await getOrCreateUser(interaction.user.id);
+    if (!claimUser.verified || !claimUser.minecraft_username) {
+      await interaction.editReply({
+        content:
+          "You must verify your Minecraft account in <#1497805898977120369> before claiming invite rewards.\n" +
+          "Open the panel, tap **Settings**, and link your IGN first.",
+      });
+      return;
+    }
 
     const stats = await getInviteStats(interaction.user.id);
     const nextMin = getNextClaimMin(stats.claimCount);

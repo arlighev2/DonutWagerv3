@@ -62,7 +62,7 @@ const command: SlashCommand = {
           inline: false,
         },
       )
-      .setFooter({ text: "Not Verified = joined but hasn't verified in-game yet • Earn 10m per valid invite" });
+      .setFooter({ text: "Not Verified = joined but hasn't verified using double counter yet • Earn 10m per valid invite" });
 
     if (canClaim) {
       const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
