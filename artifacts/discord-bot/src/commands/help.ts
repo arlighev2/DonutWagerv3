@@ -7,12 +7,14 @@ import type { SlashCommand } from "../lib/types.js";
 import { CLAIM_TIERS, COINS_PER_INVITE } from "../lib/invite_flow.js";
 import { formatCoinsShort } from "../lib/format.js";
 
+const PANEL_URL = "https://discord.com/channels/1497757397165408376/1497805898977120369";
+
 const HOW_TO_PLAY: Record<
   string,
   { title: string; color: number; description: string }
 > = {
   coinflip: {
-    title: "🪙 Coinflip",
+    title: "Coinflip",
     color: 0xfacc15,
     description:
       "`/coinflip <bet> <heads|tails>`\n\n" +
@@ -20,7 +22,7 @@ const HOW_TO_PLAY: Record<
       "50/50 odds. Simple as that.",
   },
   dice: {
-    title: "🎲 Dice",
+    title: "Dice",
     color: 0x3b82f6,
     description:
       "`/dice <bet> <target>`\n\n" +
@@ -30,18 +32,18 @@ const HOW_TO_PLAY: Record<
       "High target = harder win, bigger payout.",
   },
   mines: {
-    title: "💣 Mines",
+    title: "Mines",
     color: 0xef4444,
     description:
       "`/mines <bet> [mines]`\n\n" +
-      "A 5×5 grid of tiles hiding gems 💎 and bombs 💣.\n\n" +
-      "• Reveal a gem → multiplier goes up, keep going or cash out\n" +
-      "• Hit a bomb → lose your bet\n" +
-      "• Click **Cash Out** anytime to secure your winnings\n\n" +
+      "A 5×5 grid of tiles hiding gems and bombs.\n\n" +
+      "Reveal a gem → multiplier goes up, keep going or cash out\n" +
+      "Hit a bomb → lose your bet\n" +
+      "Click **Cash Out** anytime to secure your winnings\n\n" +
       "More mines = higher risk, higher multiplier.",
   },
   blackjack: {
-    title: "🃏 Blackjack",
+    title: "Blackjack",
     color: 0x22c55e,
     description:
       "`/blackjack <bet>`\n\n" +
@@ -51,7 +53,7 @@ const HOW_TO_PLAY: Record<
       "Aces count as 1 or 11. J/Q/K = 10.",
   },
   roulette: {
-    title: "🎡 Roulette",
+    title: "Roulette",
     color: 0xa855f7,
     description:
       "`/roulette <bet> <choice>`\n\n" +
@@ -62,7 +64,7 @@ const HOW_TO_PLAY: Record<
       "Landing on **0** loses all outside bets.",
   },
   towers: {
-    title: "🗼 Towers",
+    title: "Towers",
     color: 0xf97316,
     description:
       "`/towers <bet> [difficulty]`\n\n" +
@@ -108,7 +110,7 @@ const command: SlashCommand = {
             .setColor(info.color)
             .setTitle(info.title)
             .setDescription(info.description)
-            .setFooter({ text: "All games are provably fair. Gamble responsibly." }),
+            .setFooter({ text: "All games are provably fair." }),
         ],
         ephemeral: true,
       });
@@ -117,10 +119,13 @@ const command: SlashCommand = {
 
     const embed = new EmbedBuilder()
       .setColor(0xfacc15)
-      .setTitle("🎰 DonutSMP Casino")
+      .setTitle("DonutSMP Casino")
+      .setDescription(
+        `Head to the [command panel](${PANEL_URL}) to deposit, withdraw, and manage your account.`,
+      )
       .addFields(
         {
-          name: "💰 Account",
+          name: "Account",
           value:
             "`/balance` — check your coins\n" +
             "`/daily` — free daily reward\n" +
@@ -128,38 +133,32 @@ const command: SlashCommand = {
             "`/history games` — recent game results",
         },
         {
-          name: "🏦 Banking",
+          name: "Invites",
           value:
-            "Use the **casino panel** to deposit, withdraw & manage your account.\n" +
-            "`/close` — close your ticket",
+            "`/invites` — view your invite stats and claim rewards\n" +
+            `Earn **${formatCoinsShort(COINS_PER_INVITE)} coins** per verified invite.\n` +
+            `Milestones: ${CLAIM_TIERS.join(" → ")} invites.`,
         },
         {
-          name: "🎟️ Invites",
+          name: "Games",
           value:
-            "`/invites` — check your invite stats & claim rewards\n" +
-            `Earn **${formatCoinsShort(COINS_PER_INVITE)} coins** for every friend you invite who verifies.\n` +
-            `Rewards unlock at milestones: ${CLAIM_TIERS.join(" → ")} invites.`,
-        },
-        {
-          name: "🎮 Games",
-          value:
-            "`/coinflip` `/dice` `/mines`\n" +
-            "`/blackjack` `/roulette` `/towers`\n\n" +
+            "`/coinflip` `/dice` `/mines` `/blackjack` `/roulette` `/towers`\n\n" +
             "Use `/help game:<name>` for full rules on any game.",
         },
         {
-          name: "🎁 Extras",
+          name: "Extras",
           value:
             "`/redeem <code>` — use a promo code\n" +
             "`/provablyfair <game>` — verify a game result\n" +
-            "`/resethash` — rotate your seed",
+            "`/resethash` — rotate your seed\n" +
+            "`/close` — close your ticket",
         },
         {
-          name: "💵 Bet Format",
-          value: "`1k` `10k` `500k` `1mil` `10mil` `1bil` — also `all` and `half`",
+          name: "Bet Format",
+          value: "`1k`  `500k`  `1mil`  `10mil`  `1bil`  —  also `all` and `half`",
         },
       )
-      .setFooter({ text: "All games are provably fair. Gamble responsibly." });
+      .setFooter({ text: "All games are provably fair." });
 
     await interaction.reply({ embeds: [embed], ephemeral: true });
   },
