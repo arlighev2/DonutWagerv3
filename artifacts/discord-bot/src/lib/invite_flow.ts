@@ -12,9 +12,15 @@ import { pool, getOrCreateUser, setConfig, getConfig, deleteConfig } from "./db.
 import { formatCoins } from "./format.js";
 import { createTicketChannel } from "./tickets.js";
 import { isMod } from "./permissions.js";
+import { VOUCH_CHANNEL_ID } from "./constants.js";
 
 export const MEMBER_ROLE_ID = "1498005198990344322";
+
+// ─── INVITE REWARD RATE ───────────────────────────────────────────────────────
+// Change this number to adjust how many coins each valid invite is worth.
+// Examples: 10_000_000n = 10m | 15_000_000n = 15m | 5_000_000n = 5m
 export const COINS_PER_INVITE = 10_000_000n;
+// ─────────────────────────────────────────────────────────────────────────────
 const CLAIM_TIERS = [3, 5, 10, 20, 25];
 
 export function getNextClaimMin(claimCount: number): number {
@@ -486,7 +492,7 @@ export async function handleInviteButton(
       );
     }
 
-    for (const channelId of DEPOSIT_LOG_CHANNEL_IDS) {
+    for (const channelId of [...DEPOSIT_LOG_CHANNEL_IDS, VOUCH_CHANNEL_ID]) {
       try {
         const logChannel = await interaction.client.channels.fetch(channelId);
         if (logChannel?.isTextBased() && "send" in logChannel) {
