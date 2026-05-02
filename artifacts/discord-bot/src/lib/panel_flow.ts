@@ -84,16 +84,6 @@ export function buildPanelMessage(): {
 
   const row1 = new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder()
-      .setCustomId(`${PANEL_BTN_PREFIX}:verify_java`)
-      .setLabel("Verify (Java)")
-      .setEmoji("☕")
-      .setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder()
-      .setCustomId(`${PANEL_BTN_PREFIX}:verify_bedrock`)
-      .setLabel("Verify (Bedrock)")
-      .setEmoji("🎮")
-      .setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder()
       .setCustomId(`${PANEL_BTN_PREFIX}:deposit`)
       .setLabel("Deposit")
       .setEmoji("📥")
@@ -108,6 +98,14 @@ export function buildPanelMessage(): {
       .setLabel("Balance")
       .setEmoji("💰")
       .setStyle(ButtonStyle.Primary),
+    new ButtonBuilder()
+      .setCustomId(`${PANEL_BTN_PREFIX}:verify_java`)
+      .setLabel("Verify (Java)")
+      .setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder()
+      .setCustomId(`${PANEL_BTN_PREFIX}:verify_bedrock`)
+      .setLabel("Verify (Bedrock)")
+      .setStyle(ButtonStyle.Secondary),
   );
 
   return { embed, components: [row1] };
