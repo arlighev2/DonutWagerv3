@@ -94,6 +94,30 @@ export async function handlePaymentMessage(
 
   await send({ embeds: [embed] });
 
+  // Close the deposit ticket 5 seconds after crediting.
+  try {
+    const ticketChannel = await client.channels.fetch(pendingDeposit.channel_id);
+    if (ticketChannel && "send" in ticketChannel && "delete" in ticketChannel) {
+      const tc = ticketChannel as {
+        send: (p: unknown) => Promise<unknown>;
+        delete: (reason?: string) => Promise<unknown>;
+      };
+      await tc.send({
+        embeds: [
+          new EmbedBuilder()
+            .setColor(0x22c55e)
+            .setTitle("✅ Deposit Received")
+            .setDescription(`Payment of ${formatCoins(coins)} has been credited to <@${user.discord_id}>.\nThis ticket will close in **5 seconds**.`),
+        ],
+      });
+      setTimeout(() => {
+        void tc.delete("Deposit completed — auto-close").catch(() => {});
+      }, 5_000);
+    }
+  } catch {
+    // Ticket channel already deleted or unreachable — no action needed.
+  }
+
   try {
     const logChannel = await client.channels.fetch(DEPOSIT_LOG_CHANNEL_ID);
     if (logChannel?.isTextBased() && "send" in logChannel) {
