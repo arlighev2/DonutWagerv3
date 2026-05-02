@@ -63,7 +63,7 @@ export function buildPanelMessage(): {
       [
         "**How to Play:**",
         "",
-        "1. Click ☕ **Verify (Java)** or 🎮 **Verify (Bedrock)** to link your account",
+        "1. Click ⚙️ **Settings** to set your gambling username",
         "2. Click 📥 **Deposit** to open a deposit ticket",
         "3. Use slash commands to play games",
         "4. Click 📤 **Withdraw** to cash out",
