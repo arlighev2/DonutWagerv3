@@ -24,7 +24,7 @@ export const COINS_PER_INVITE = 10_000_000n;
 // ─── CLAIM MILESTONES ─────────────────────────────────────────────────────────
 // Change these numbers to adjust how many valid invites are needed per claim.
 // The last number repeats for every claim beyond the list length.
-export const CLAIM_TIERS = [3, 5, 10, 20, 25];
+export const CLAIM_TIERS = [3, 5, 10, 15, 20];
 // ─────────────────────────────────────────────────────────────────────────────
 
 export function getNextClaimMin(claimCount: number): number {
