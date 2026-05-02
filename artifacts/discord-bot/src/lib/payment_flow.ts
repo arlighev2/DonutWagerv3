@@ -67,6 +67,18 @@ export async function handlePaymentMessage(
     return;
   }
 
+  const expectedCoins = BigInt(pendingDeposit.amount);
+  if (coins !== expectedCoins) {
+    const expected = formatCoins(expectedCoins);
+    const got = formatCoins(coins);
+    await send(
+      `❌ Wrong amount from **${mcUsername}** (<@${user.discord_id}>). ` +
+      `Their ticket is for **${expected}** but they paid **${got}**. ` +
+      `They need to pay the exact amount stated in their deposit ticket.`,
+    );
+    return;
+  }
+
   await getOrCreateUser(user.discord_id);
   const newBal = await adjustBalance(user.discord_id, coins);
   await recordBalanceEvent({
