@@ -146,8 +146,7 @@ const command: SlashCommand = {
         {
           name: "Banking",
           value:
-            "`/deposit <amount>` — open a deposit ticket (min **1mil**)\n" +
-            "`/withdraw <amount>` — open a withdrawal ticket (min **1mil**)\n" +
+            "Use the **casino panel** to deposit, withdraw, and manage your account.\n" +
             "`/close` — close the current ticket",
         },
         {

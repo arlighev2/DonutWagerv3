@@ -1,9 +1,6 @@
 import type { SlashCommand } from "../lib/types.js";
-import verify from "./verify.js";
 import balance from "./balance.js";
 import daily from "./daily.js";
-import deposit from "./deposit.js";
-import withdraw from "./withdraw.js";
 import pay from "./pay.js";
 import close from "./close.js";
 import admin from "./admin.js";
@@ -22,11 +19,8 @@ import provablyfair from "./provablyfair.js";
 import resethash from "./resethash.js";
 
 export const commands: SlashCommand[] = [
-  verify,
   balance,
   daily,
-  deposit,
-  withdraw,
   pay,
   close,
   admin,
