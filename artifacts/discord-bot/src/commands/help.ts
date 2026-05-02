@@ -4,6 +4,8 @@ import {
   type ChatInputCommandInteraction,
 } from "discord.js";
 import type { SlashCommand } from "../lib/types.js";
+import { CLAIM_TIERS, COINS_PER_INVITE } from "../lib/invite_flow.js";
+import { formatCoinsShort } from "../lib/format.js";
 
 const HOW_TO_PLAY: Record<
   string,
@@ -135,8 +137,8 @@ const command: SlashCommand = {
           name: "🎟️ Invites",
           value:
             "`/invites` — check your invite stats & claim rewards\n" +
-            "Earn **10m coins** for every friend you invite who verifies.\n" +
-            "Rewards unlock at milestones: 3 → 5 → 10 → 20 → 25 invites.",
+            `Earn **${formatCoinsShort(COINS_PER_INVITE)} coins** for every friend you invite who verifies.\n` +
+            `Rewards unlock at milestones: ${CLAIM_TIERS.join(" → ")} invites.`,
         },
         {
           name: "🎮 Games",

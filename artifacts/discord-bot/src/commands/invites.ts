@@ -8,11 +8,12 @@ import {
 } from "discord.js";
 import type { SlashCommand } from "../lib/types.js";
 import {
+  CLAIM_TIERS,
   COINS_PER_INVITE,
   getInviteStats,
   getNextClaimMin,
 } from "../lib/invite_flow.js";
-import { formatCoins } from "../lib/format.js";
+import { formatCoins, formatCoinsShort } from "../lib/format.js";
 
 const command: SlashCommand = {
   data: new SlashCommandBuilder()
@@ -77,7 +78,7 @@ const command: SlashCommand = {
       .setColor(canClaim ? 0x22c55e : 0xfacc15)
       .setTitle("🎟️ Your Invite Stats")
       .addFields(...fields)
-      .setFooter({ text: "Not Verified = joined but hasn't verified using double counter yet • Earn 10m per valid invite" });
+      .setFooter({ text: `Not Verified = joined but hasn't verified yet • Earn ${formatCoinsShort(COINS_PER_INVITE)} per valid invite • Milestones: ${CLAIM_TIERS.join(" → ")}` });
 
     if (canClaim) {
       const row = new ActionRowBuilder<ButtonBuilder>().addComponents(

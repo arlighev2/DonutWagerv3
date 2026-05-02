@@ -9,7 +9,7 @@ import {
   type PartialGuildMember,
 } from "discord.js";
 import { pool, getOrCreateUser, setConfig, getConfig, deleteConfig } from "./db.js";
-import { formatCoins } from "./format.js";
+import { formatCoins, formatCoinsShort } from "./format.js";
 import { createTicketChannel } from "./tickets.js";
 import { isMod } from "./permissions.js";
 import { VOUCH_CHANNEL_ID } from "./constants.js";
@@ -21,7 +21,11 @@ export const MEMBER_ROLE_ID = "1498005198990344322";
 // Examples: 10_000_000n = 10m | 15_000_000n = 15m | 5_000_000n = 5m
 export const COINS_PER_INVITE = 10_000_000n;
 // ─────────────────────────────────────────────────────────────────────────────
-const CLAIM_TIERS = [3, 5, 10, 20, 25];
+// ─── CLAIM MILESTONES ─────────────────────────────────────────────────────────
+// Change these numbers to adjust how many valid invites are needed per claim.
+// The last number repeats for every claim beyond the list length.
+export const CLAIM_TIERS = [3, 5, 10, 20, 25];
+// ─────────────────────────────────────────────────────────────────────────────
 
 export function getNextClaimMin(claimCount: number): number {
   return CLAIM_TIERS[Math.min(claimCount, CLAIM_TIERS.length - 1)] ?? 25;
@@ -488,7 +492,7 @@ export async function handleInviteButton(
 
     if (interaction.channel && "send" in interaction.channel) {
       await interaction.channel.send(
-        `<@${targetId}> 🎉 **${formatCoins(coinsAwarded)}** (${pending.invitesUsed} invite${pending.invitesUsed !== 1 ? "s" : ""} × 10m) has been added to your balance!`,
+        `<@${targetId}> 🎉 **${formatCoins(coinsAwarded)}** (${pending.invitesUsed} invite${pending.invitesUsed !== 1 ? "s" : ""} × ${formatCoinsShort(COINS_PER_INVITE)}) has been added to your balance!`,
       );
     }
 
