@@ -509,8 +509,8 @@ export async function handleInviteButton(
 
     // Post a clean vouch to the vouch channel.
     const vouchEmbed = new EmbedBuilder()
-      .setColor(0xfacc15)
-      .setTitle("🎟️ Invite Reward Vouch")
+      .setColor(0x22c55e)
+      .setTitle("Invite Reward Vouch")
       .addFields(
         { name: "👤 User", value: `<@${targetId}>`, inline: true },
         { name: "🎟️ Invites Paid", value: `${pending.invitesUsed}`, inline: true },
