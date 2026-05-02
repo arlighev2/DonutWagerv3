@@ -216,6 +216,14 @@ const command: SlashCommand = {
                 .setMaxValue(50)
                 .setRequired(true),
             ),
+        )
+        .addSubcommand((sc) =>
+          sc
+            .setName("reset")
+            .setDescription("Wipe all invite data for a user (invites, claims, pending)")
+            .addUserOption((o) =>
+              o.setName("user").setDescription("User to reset").setRequired(true),
+            ),
         ),
     ),
 
@@ -231,6 +239,38 @@ const command: SlashCommand = {
         await interaction.reply({ content: "Bot owner only.", ephemeral: true });
         return;
       }
+      if (sub === "reset") {
+        const target = interaction.options.getUser("user", true);
+        await interaction.deferReply({ ephemeral: true });
+
+        // Remove all invite rows where this user is the inviter
+        const inviteRes = await pool.query(
+          `DELETE FROM bot_invite_members WHERE inviter_discord_id = $1`,
+          [target.id],
+        );
+        // Remove all claim records
+        const claimRes = await pool.query(
+          `DELETE FROM bot_invite_claims WHERE discord_id = $1`,
+          [target.id],
+        );
+        // Remove any pending claim config key
+        await pool.query(
+          `DELETE FROM bot_config WHERE key = $1`,
+          [`invite_pending_${target.id}`],
+        );
+
+        await interaction.editReply({
+          content: [
+            `✅ Invite data reset for <@${target.id}>.`,
+            ``,
+            `• Invite rows removed: **${inviteRes.rowCount ?? 0}**`,
+            `• Claim records removed: **${claimRes.rowCount ?? 0}**`,
+            `• Pending claim cleared`,
+          ].join("\n"),
+        });
+        return;
+      }
+
       if (sub === "add") {
         const target = interaction.options.getUser("user", true);
         const amount = interaction.options.getInteger("amount", true);
