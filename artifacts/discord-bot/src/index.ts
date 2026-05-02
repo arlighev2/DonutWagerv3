@@ -6,7 +6,9 @@ import {
   REST,
   Routes,
   type ButtonInteraction,
+  type GuildMember,
   type Interaction,
+  type PartialGuildMember,
 } from "discord.js";
 import { commandMap, commands } from "./commands/index.js";
 import { createHash } from "node:crypto";
@@ -31,6 +33,13 @@ import {
   handlePanelButton,
   handlePanelModal,
 } from "./lib/panel_flow.js";
+import {
+  handleInviteButton,
+  handleMemberAdd,
+  handleMemberRemove,
+  handleMemberUpdate,
+  initInviteCache,
+} from "./lib/invite_flow.js";
 
 // One-time auto-post target for the casino panel embed.
 const DEFAULT_PANEL_CHANNEL_ID = "1498881450643296400";
@@ -261,6 +270,30 @@ async function main(): Promise<void> {
     void ensurePanelPosted(c).catch((err) => {
       console.error("[bot] Panel auto-post failed:", err);
     });
+    void initInviteCache(c).catch((err) => {
+      console.error("[bot] Invite cache init failed:", err);
+    });
+  });
+
+  client.on(Events.GuildMemberAdd, (member) => {
+    void handleMemberAdd(member as GuildMember).catch((err) => {
+      console.error("[bot] GuildMemberAdd handler failed:", err);
+    });
+  });
+
+  client.on(Events.GuildMemberRemove, (member) => {
+    void handleMemberRemove(member as GuildMember | PartialGuildMember).catch((err) => {
+      console.error("[bot] GuildMemberRemove handler failed:", err);
+    });
+  });
+
+  client.on(Events.GuildMemberUpdate, (oldMember, newMember) => {
+    void handleMemberUpdate(
+      oldMember as GuildMember | PartialGuildMember,
+      newMember as GuildMember,
+    ).catch((err) => {
+      console.error("[bot] GuildMemberUpdate handler failed:", err);
+    });
   });
 
   // Auto-register when the bot is added to a new guild later.
@@ -292,6 +325,10 @@ async function main(): Promise<void> {
         }
         if (interaction.customId.startsWith(`${PANEL_BTN_PREFIX}:`)) {
           await handlePanelButton(interaction);
+          return;
+        }
+        if (interaction.customId.startsWith("invite:")) {
+          await handleInviteButton(interaction);
           return;
         }
         // Other button collectors (mines, blackjack, towers) are handled in

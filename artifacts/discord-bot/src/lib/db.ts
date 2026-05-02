@@ -90,6 +90,29 @@ export async function initSchema(): Promise<void> {
     );
     CREATE INDEX IF NOT EXISTS idx_pending_withdrawals_user
       ON bot_pending_withdrawals(discord_id, status);
+
+    CREATE TABLE IF NOT EXISTS bot_invite_members (
+      invitee_discord_id VARCHAR(32) PRIMARY KEY,
+      inviter_discord_id VARCHAR(32) NOT NULL,
+      invite_code        VARCHAR(32),
+      joined_at          TIMESTAMP NOT NULL DEFAULT NOW(),
+      left_at            TIMESTAMP,
+      has_member_role    BOOLEAN NOT NULL DEFAULT FALSE,
+      claimed            BOOLEAN NOT NULL DEFAULT FALSE
+    );
+    CREATE INDEX IF NOT EXISTS idx_invite_members_inviter
+      ON bot_invite_members(inviter_discord_id);
+
+    CREATE TABLE IF NOT EXISTS bot_invite_claims (
+      id             SERIAL PRIMARY KEY,
+      discord_id     VARCHAR(32) NOT NULL,
+      claim_number   INT NOT NULL,
+      invites_used   INT NOT NULL,
+      coins_awarded  BIGINT NOT NULL,
+      claimed_at     TIMESTAMP NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_invite_claims_user
+      ON bot_invite_claims(discord_id);
   `);
 }
 
@@ -379,6 +402,7 @@ export type BalanceSource =
   | "daily"
   | "admin"
   | "deposit"
+  | "invite"
   | "withdraw"
   | "irlwithdraw";
 
