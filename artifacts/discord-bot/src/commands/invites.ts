@@ -19,7 +19,7 @@ const command: SlashCommand = {
     .setName("invites")
     .setDescription("View your invite stats and claim your coin rewards"),
   async execute(interaction: ChatInputCommandInteraction): Promise<void> {
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply();
 
     const stats = await getInviteStats(interaction.user.id);
     const nextMin = getNextClaimMin(stats.claimCount);
