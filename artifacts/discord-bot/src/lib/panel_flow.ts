@@ -455,7 +455,7 @@ export async function handlePanelModal(
         .setColor(0x22c55e)
         .setTitle("Deposit Ticket")
         .setDescription(
-          `Welcome <@${interaction.user.id}>!\n\nA staff member will be with you shortly to take your in-game payment on **DonutSMP**.`,
+          `Welcome <@${interaction.user.id}>!\n\nAn admin will provide you with a username to pay in-game. The moment you send the payment, the bot will detect it and automatically add it to your balance.\n\n**Make sure to pay from the Minecraft account you verified.**`,
         )
         .addFields(
           {
@@ -464,13 +464,9 @@ export async function handlePanelModal(
             inline: true,
           },
           {
-            name: "How it works",
-            value:
-              "1. **Wait here** for a staff member to send you their IGN to pay.\n" +
-              "2. Log in to DonutSMP and `/pay <staff-ign> <amount>` in-game.\n" +
-              "3. **Take a screenshot** of the in-game payment confirmation.\n" +
-              "4. Send the screenshot here in this ticket.\n" +
-              "5. Staff will verify and credit your bot balance.",
+            name: "IGN on file",
+            value: `\`${user.minecraft_username}\``,
+            inline: true,
           },
         );
       await (ticket.channel as TextChannel).send({ content: mention, embeds: [depositEmbed] });
