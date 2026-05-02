@@ -35,7 +35,7 @@ import {
 } from "../lib/gamblelog.js";
 import { CATEGORY_CONFIG_KEYS } from "../lib/tickets.js";
 import { buildPanelMessage } from "../lib/panel_flow.js";
-import { getInviteStats, getNextClaimMin, COINS_PER_INVITE } from "../lib/invite_flow.js";
+import { getInviteStats, getInviteList, getNextClaimMin, COINS_PER_INVITE } from "../lib/invite_flow.js";
 
 const DEPOSIT_LOG_CHANNEL_IDS = ["1498419875021066240", "1498440931026927817"];
 
@@ -232,6 +232,14 @@ const command: SlashCommand = {
             .addUserOption((o) =>
               o.setName("user").setDescription("User to inspect").setRequired(true),
             ),
+        )
+        .addSubcommand((sc) =>
+          sc
+            .setName("invited")
+            .setDescription("See the full list of members a user has invited")
+            .addUserOption((o) =>
+              o.setName("user").setDescription("User to look up").setRequired(true),
+            ),
         ),
     ),
 
@@ -329,6 +337,62 @@ const command: SlashCommand = {
           .setTimestamp();
 
         await interaction.editReply({ embeds: [embed] });
+        return;
+      }
+
+      if (sub === "invited") {
+        const target = interaction.options.getUser("user", true);
+        await interaction.deferReply({ ephemeral: true });
+
+        const [list, stats] = await Promise.all([
+          getInviteList(target.id),
+          getInviteStats(target.id),
+        ]);
+        const nextMin = getNextClaimMin(stats.claimCount);
+
+        if (list.length === 0) {
+          await interaction.editReply({
+            embeds: [
+              new EmbedBuilder()
+                .setColor(0x3b82f6)
+                .setTitle(`🎟️ Invites — ${target.username}`)
+                .setDescription("This user has not invited anyone yet."),
+            ],
+          });
+          return;
+        }
+
+        const lines = list.map((row) => {
+          const icon = row.left_at !== null ? "❌" : row.claimed ? "🏆" : row.has_member_role ? "✅" : "⏳";
+          const label = row.left_at !== null ? "Left" : row.claimed ? "Claimed" : row.has_member_role ? "Valid" : "Not Verified";
+          const ts = Math.floor(new Date(row.joined_at).getTime() / 1000);
+          return `${icon} <@${row.invitee_discord_id}> — **${label}** · joined <t:${ts}:R>`;
+        });
+
+        const chunkSize = 20;
+        const chunks: string[][] = [];
+        for (let i = 0; i < lines.length; i += chunkSize) chunks.push(lines.slice(i, i + chunkSize));
+
+        const firstEmbed = new EmbedBuilder()
+          .setColor(0x3b82f6)
+          .setTitle(`🎟️ Invites — ${target.username}`)
+          .setDescription(chunks[0]!.join("\n"))
+          .addFields(
+            { name: "📨 Total", value: `${stats.totalInvited}`, inline: true },
+            { name: "✅ Valid Unclaimed", value: `${stats.validUnclaimed - stats.claimedAndLeft}`, inline: true },
+            { name: "⏳ Not Verified", value: `${stats.notVerified}`, inline: true },
+            { name: "❌ Left", value: `${stats.leftServer}`, inline: true },
+            { name: "🏆 Total Claimed", value: `${stats.totalClaimed}`, inline: true },
+            { name: "🎯 Next Claim Needs", value: `${nextMin} net valid`, inline: true },
+          )
+          .setFooter({ text: "✅ Valid  ⏳ Not Verified  ❌ Left  🏆 Claimed" });
+
+        const embeds = [firstEmbed];
+        for (let i = 1; i < chunks.length; i++) {
+          embeds.push(new EmbedBuilder().setColor(0x3b82f6).setDescription(chunks[i]!.join("\n")));
+        }
+
+        await interaction.editReply({ embeds });
         return;
       }
 

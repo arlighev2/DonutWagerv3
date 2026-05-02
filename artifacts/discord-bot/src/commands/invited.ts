@@ -31,7 +31,7 @@ function statusLabel(row: {
 
 const command: SlashCommand = {
   data: new SlashCommandBuilder()
-    .setName("admininvites")
+    .setName("invited")
     .setDescription("Staff: view all members a user has invited")
     .addUserOption((o) =>
       o.setName("user").setDescription("User to look up").setRequired(true),
