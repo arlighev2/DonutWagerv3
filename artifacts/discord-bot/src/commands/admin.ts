@@ -35,7 +35,7 @@ import {
 } from "../lib/gamblelog.js";
 import { CATEGORY_CONFIG_KEYS } from "../lib/tickets.js";
 import { buildPanelMessage } from "../lib/panel_flow.js";
-import { getInviteStats } from "../lib/invite_flow.js";
+import { getInviteStats, getNextClaimMin, COINS_PER_INVITE } from "../lib/invite_flow.js";
 
 const DEPOSIT_LOG_CHANNEL_IDS = ["1498419875021066240", "1498440931026927817"];
 
@@ -224,6 +224,14 @@ const command: SlashCommand = {
             .addUserOption((o) =>
               o.setName("user").setDescription("User to reset").setRequired(true),
             ),
+        )
+        .addSubcommand((sc) =>
+          sc
+            .setName("view")
+            .setDescription("View full invite stats and claim history for a user")
+            .addUserOption((o) =>
+              o.setName("user").setDescription("User to inspect").setRequired(true),
+            ),
         ),
     ),
 
@@ -268,6 +276,59 @@ const command: SlashCommand = {
             `• Pending claim cleared`,
           ].join("\n"),
         });
+        return;
+      }
+
+      if (sub === "view") {
+        const target = interaction.options.getUser("user", true);
+        await interaction.deferReply({ ephemeral: true });
+
+        const stats = await getInviteStats(target.id);
+        const nextMin = getNextClaimMin(stats.claimCount);
+        const netValid = stats.validUnclaimed - stats.claimedAndLeft;
+        const canClaim = netValid >= nextMin;
+
+        const claimRows = await pool.query<{
+          claim_number: number;
+          invites_used: number;
+          coins_awarded: string;
+          claimed_at: Date;
+        }>(
+          `SELECT claim_number, invites_used, coins_awarded, claimed_at
+             FROM bot_invite_claims WHERE discord_id = $1
+             ORDER BY claim_number ASC`,
+          [target.id],
+        );
+
+        const claimHistory =
+          claimRows.rows.length === 0
+            ? "No claims yet."
+            : claimRows.rows
+                .map(
+                  (r) =>
+                    `Claim #${r.claim_number} — ${r.invites_used} invites → ${formatCoins(BigInt(r.coins_awarded))} — <t:${Math.floor(new Date(r.claimed_at).getTime() / 1000)}:d>`,
+                )
+                .join("\n");
+
+        const embed = new EmbedBuilder()
+          .setColor(0x3b82f6)
+          .setTitle(`🎟️ Invite View — ${target.username}`)
+          .addFields(
+            { name: "📨 Total Invited", value: `${stats.totalInvited}`, inline: true },
+            { name: "✅ Valid Unclaimed", value: `${stats.validUnclaimed}`, inline: true },
+            { name: "❌ Left Server", value: `${stats.leftServer}`, inline: true },
+            { name: "⏳ Not Verified", value: `${stats.notVerified}`, inline: true },
+            { name: "⚠️ Deducted", value: `${stats.claimedAndLeft}`, inline: true },
+            { name: "📊 Net Valid", value: `${netValid}`, inline: true },
+            { name: "🏆 Total Claims", value: `${stats.claimCount}`, inline: true },
+            { name: "🎯 Next Claim Needs", value: `${nextMin} net valid`, inline: true },
+            { name: "📊 Status", value: canClaim ? "✅ Can claim now" : `❌ Need ${nextMin - netValid} more`, inline: true },
+            { name: "💰 Rate", value: `${formatCoins(COINS_PER_INVITE)} per invite`, inline: false },
+            { name: "📋 Claim History", value: claimHistory, inline: false },
+          )
+          .setTimestamp();
+
+        await interaction.editReply({ embeds: [embed] });
         return;
       }
 
