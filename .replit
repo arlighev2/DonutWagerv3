@@ -3,6 +3,7 @@ modules = ["nodejs-24"]
 [deployment]
 router = "application"
 deploymentTarget = "autoscale"
+run = ["bash", "scripts/start-production.sh"]
 
 [deployment.postBuild]
 args = ["pnpm", "store", "prune"]
