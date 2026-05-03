@@ -332,46 +332,49 @@ const command: SlashCommand = {
         }
 
         state.cashedOut = true;
-        const mult = multiplierFor(state.revealed.size, state.mines);
-        const payout = BigInt(Math.floor(Number(state.bet) * mult));
-        const newBalance = await adjustBalance(interaction.user.id, payout);
-        await recordGame({
-          discordId: interaction.user.id,
-          game: "mines",
-          bet: state.bet,
-          payout,
-          won: payout > state.bet,
-          details: { picks: state.revealed.size, mines: state.mines, mult },
-        });
-        await logGamble({
-          discordId: interaction.user.id,
-          game: "mines",
-          bet: state.bet,
-          payout,
-          won: payout > state.bet,
-          detail: `cashout ${state.revealed.size} picks, ${state.mines} mines, x${mult.toFixed(2)}`,
-        });
-        let safety = 0;
-        while (state.mineTiles.size < state.mines && safety++ < 200) {
-          const candidate = Math.floor(Math.random() * GRID);
-          if (!state.revealed.has(candidate) && !state.mineTiles.has(candidate))
-            state.mineTiles.add(candidate);
-        }
         try {
-          await btn.update({
-            components: [
-              buildContainer(state, mult, true, {
-                multiplier: mult,
-                netDelta: payout - state.bet,
-                newBalance,
-              }),
-            ],
+          const mult = multiplierFor(state.revealed.size, state.mines);
+          const payout = BigInt(Math.floor(Number(state.bet) * mult));
+          const newBalance = await adjustBalance(interaction.user.id, payout);
+          await recordGame({
+            discordId: interaction.user.id,
+            game: "mines",
+            bet: state.bet,
+            payout,
+            won: payout > state.bet,
+            details: { picks: state.revealed.size, mines: state.mines, mult },
           });
-        } catch {
-          /* ignore */
+          await logGamble({
+            discordId: interaction.user.id,
+            game: "mines",
+            bet: state.bet,
+            payout,
+            won: payout > state.bet,
+            detail: `cashout ${state.revealed.size} picks, ${state.mines} mines, x${mult.toFixed(2)}`,
+          });
+          let safety = 0;
+          while (state.mineTiles.size < state.mines && safety++ < 200) {
+            const candidate = Math.floor(Math.random() * GRID);
+            if (!state.revealed.has(candidate) && !state.mineTiles.has(candidate))
+              state.mineTiles.add(candidate);
+          }
+          try {
+            await btn.update({
+              components: [
+                buildContainer(state, mult, true, {
+                  multiplier: mult,
+                  netDelta: payout - state.bet,
+                  newBalance,
+                }),
+              ],
+            });
+          } catch {
+            /* ignore */
+          }
+        } finally {
+          endSession(interaction.user.id);
+          collector.stop("cashout");
         }
-        endSession(interaction.user.id);
-        collector.stop("cashout");
         return;
       }
 
@@ -410,44 +413,47 @@ const command: SlashCommand = {
       if (!survive) {
         state.exploded = true;
         if (!state.mineTiles.has(idx)) state.mineTiles.add(idx);
-        await recordGame({
-          discordId: interaction.user.id,
-          game: "mines",
-          bet: state.bet,
-          payout: 0n,
-          won: false,
-          details: {
-            picks: state.revealed.size,
-            mines: state.mines,
-            blewUp: idx,
-            rig,
-            ceilingBust,
-          },
-        });
-        await logGamble({
-          discordId: interaction.user.id,
-          game: "mines",
-          bet: state.bet,
-          payout: 0n,
-          won: false,
-          detail: `boom on tile ${idx} after ${state.revealed.size} picks (rig ${(rig * 100).toFixed(0)}%${ceilingBust ? ", ceiling" : ""})`,
-        });
-        const currentUser = await getOrCreateUser(interaction.user.id);
         try {
-          await btn.update({
-            components: [
-              buildContainer(state, 0, true, {
-                multiplier: 0,
-                netDelta: -state.bet,
-                newBalance: BigInt(currentUser.balance),
-              }),
-            ],
+          await recordGame({
+            discordId: interaction.user.id,
+            game: "mines",
+            bet: state.bet,
+            payout: 0n,
+            won: false,
+            details: {
+              picks: state.revealed.size,
+              mines: state.mines,
+              blewUp: idx,
+              rig,
+              ceilingBust,
+            },
           });
-        } catch {
-          /* ignore */
+          await logGamble({
+            discordId: interaction.user.id,
+            game: "mines",
+            bet: state.bet,
+            payout: 0n,
+            won: false,
+            detail: `boom on tile ${idx} after ${state.revealed.size} picks (rig ${(rig * 100).toFixed(0)}%${ceilingBust ? ", ceiling" : ""})`,
+          });
+          const currentUser = await getOrCreateUser(interaction.user.id);
+          try {
+            await btn.update({
+              components: [
+                buildContainer(state, 0, true, {
+                  multiplier: 0,
+                  netDelta: -state.bet,
+                  newBalance: BigInt(currentUser.balance),
+                }),
+              ],
+            });
+          } catch {
+            /* ignore */
+          }
+        } finally {
+          endSession(interaction.user.id);
+          collector.stop("explode");
         }
-        endSession(interaction.user.id);
-        collector.stop("explode");
         return;
       }
 

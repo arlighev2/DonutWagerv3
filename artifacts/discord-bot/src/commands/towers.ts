@@ -287,35 +287,40 @@ const command: SlashCommand = {
           return;
         }
         state.cashedOut = true;
-        const mult = multiplierFor(state.currentRow, state.cols);
-        const payout = BigInt(Math.floor(Number(state.bet) * mult));
-        await adjustBalance(interaction.user.id, payout);
-        await recordGame({
-          discordId: interaction.user.id,
-          game: "towers",
-          bet: state.bet,
-          payout,
-          won: payout > state.bet,
-          details: {
-            level: state.currentRow,
-            difficulty: state.difficulty,
-            cols: state.cols,
-          },
-        });
-        await logGamble({
-          discordId: interaction.user.id,
-          game: "towers",
-          bet: state.bet,
-          payout,
-          won: payout > state.bet,
-          detail: `cashout at level ${state.currentRow} (${state.difficulty})`,
-        });
-        await btn.update({
-          embeds: [buildEmbed(`**Cashed out for ${formatCoins(payout)}!**`, mult)],
-          components: buildRows(state, true),
-        });
-        endSession(interaction.user.id);
-        collector.stop("cashout");
+        try {
+          const mult = multiplierFor(state.currentRow, state.cols);
+          const payout = BigInt(Math.floor(Number(state.bet) * mult));
+          await adjustBalance(interaction.user.id, payout);
+          await recordGame({
+            discordId: interaction.user.id,
+            game: "towers",
+            bet: state.bet,
+            payout,
+            won: payout > state.bet,
+            details: {
+              level: state.currentRow,
+              difficulty: state.difficulty,
+              cols: state.cols,
+            },
+          });
+          await logGamble({
+            discordId: interaction.user.id,
+            game: "towers",
+            bet: state.bet,
+            payout,
+            won: payout > state.bet,
+            detail: `cashout at level ${state.currentRow} (${state.difficulty})`,
+          });
+          try {
+            await btn.update({
+              embeds: [buildEmbed(`**Cashed out for ${formatCoins(payout)}!**`, mult)],
+              components: buildRows(state, true),
+            });
+          } catch { /* ignore */ }
+        } finally {
+          endSession(interaction.user.id);
+          collector.stop("cashout");
+        }
         return;
       }
 
@@ -343,37 +348,42 @@ const command: SlashCommand = {
         state.picks[r] = c;
         state.failedRow = r;
         state.failed = true;
-        await recordGame({
-          discordId: interaction.user.id,
-          game: "towers",
-          bet: state.bet,
-          payout: 0n,
-          won: false,
-          details: {
-            failedRow: r,
-            difficulty: state.difficulty,
-            cols: state.cols,
-          },
-        });
-        await logGamble({
-          discordId: interaction.user.id,
-          game: "towers",
-          bet: state.bet,
-          payout: 0n,
-          won: false,
-          detail: `fell at level ${r + 1} (${state.difficulty})`,
-        });
-        await btn.update({
-          embeds: [
-            buildEmbed(
-              `**BOOM — bomb on level ${r + 1}.** Lost ${formatCoins(state.bet)}.`,
-              0,
-            ),
-          ],
-          components: buildRows(state, true),
-        });
-        endSession(interaction.user.id);
-        collector.stop("explode");
+        try {
+          await recordGame({
+            discordId: interaction.user.id,
+            game: "towers",
+            bet: state.bet,
+            payout: 0n,
+            won: false,
+            details: {
+              failedRow: r,
+              difficulty: state.difficulty,
+              cols: state.cols,
+            },
+          });
+          await logGamble({
+            discordId: interaction.user.id,
+            game: "towers",
+            bet: state.bet,
+            payout: 0n,
+            won: false,
+            detail: `fell at level ${r + 1} (${state.difficulty})`,
+          });
+          try {
+            await btn.update({
+              embeds: [
+                buildEmbed(
+                  `**BOOM — bomb on level ${r + 1}.** Lost ${formatCoins(state.bet)}.`,
+                  0,
+                ),
+              ],
+              components: buildRows(state, true),
+            });
+          } catch { /* ignore */ }
+        } finally {
+          endSession(interaction.user.id);
+          collector.stop("explode");
+        }
         return;
       }
 
@@ -389,41 +399,46 @@ const command: SlashCommand = {
 
       if (state.currentRow >= ROWS) {
         state.cashedOut = true;
-        const mult = multiplierFor(ROWS, state.cols);
-        const payout = BigInt(Math.floor(Number(state.bet) * mult));
-        await adjustBalance(interaction.user.id, payout);
-        await recordGame({
-          discordId: interaction.user.id,
-          game: "towers",
-          bet: state.bet,
-          payout,
-          won: true,
-          details: {
-            level: ROWS,
-            maxedOut: true,
-            difficulty: state.difficulty,
-            cols: state.cols,
-          },
-        });
-        await logGamble({
-          discordId: interaction.user.id,
-          game: "towers",
-          bet: state.bet,
-          payout,
-          won: true,
-          detail: `topped the tower (${state.difficulty}, all ${ROWS} levels)`,
-        });
-        await btn.update({
-          embeds: [
-            buildEmbed(
-              `**Reached the top! Won ${formatCoins(payout)}.**`,
-              mult,
-            ),
-          ],
-          components: buildRows(state, true),
-        });
-        endSession(interaction.user.id);
-        collector.stop("topped");
+        try {
+          const mult = multiplierFor(ROWS, state.cols);
+          const payout = BigInt(Math.floor(Number(state.bet) * mult));
+          await adjustBalance(interaction.user.id, payout);
+          await recordGame({
+            discordId: interaction.user.id,
+            game: "towers",
+            bet: state.bet,
+            payout,
+            won: true,
+            details: {
+              level: ROWS,
+              maxedOut: true,
+              difficulty: state.difficulty,
+              cols: state.cols,
+            },
+          });
+          await logGamble({
+            discordId: interaction.user.id,
+            game: "towers",
+            bet: state.bet,
+            payout,
+            won: true,
+            detail: `topped the tower (${state.difficulty}, all ${ROWS} levels)`,
+          });
+          try {
+            await btn.update({
+              embeds: [
+                buildEmbed(
+                  `**Reached the top! Won ${formatCoins(payout)}.**`,
+                  mult,
+                ),
+              ],
+              components: buildRows(state, true),
+            });
+          } catch { /* ignore */ }
+        } finally {
+          endSession(interaction.user.id);
+          collector.stop("topped");
+        }
         return;
       }
 

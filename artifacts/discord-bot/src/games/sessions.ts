@@ -25,10 +25,11 @@ export function endSession(userId: string): void {
   sessions.delete(userId);
 }
 
-// Auto-cleanup: drop stale sessions older than 10 minutes
+// Auto-cleanup: drop stale sessions older than 6 minutes
+// (collectors time out after 5 min, so anything older is definitely orphaned)
 setInterval(
   () => {
-    const cutoff = Date.now() - 10 * 60 * 1000;
+    const cutoff = Date.now() - 6 * 60 * 1000;
     for (const [id, sess] of sessions) {
       if (sess.startedAt < cutoff) sessions.delete(id);
     }

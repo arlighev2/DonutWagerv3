@@ -288,105 +288,111 @@ const command: SlashCommand = {
       btn: ButtonInteraction | null,
       doubled = false,
     ): Promise<void> => {
-      while (handTotal(state.dealer) < 17) {
-        state.dealer.push(drawBiased(state, false));
+      try {
+        while (handTotal(state.dealer) < 17) {
+          state.dealer.push(drawBiased(state, false));
+        }
+        const pTotal = handTotal(state.player);
+        const dTotal = handTotal(state.dealer);
+        const stake = doubled ? state.bet * 2n : state.bet;
+
+        let result: "win" | "lose" | "push";
+        let payout = 0n;
+        if (pTotal > 21) {
+          result = "lose";
+        } else if (dTotal > 21 || pTotal > dTotal) {
+          result = "win";
+          payout = stake * 2n;
+        } else if (pTotal === dTotal) {
+          result = "push";
+          payout = stake;
+        } else {
+          result = "lose";
+        }
+
+        if (payout > 0n) await adjustBalance(interaction.user.id, payout);
+        await recordGame({
+          discordId: interaction.user.id,
+          game: "blackjack",
+          bet: stake,
+          payout,
+          won: result === "win",
+          details: { result, pTotal, dTotal, doubled },
+        });
+        await logGamble({
+          discordId: interaction.user.id,
+          game: "blackjack",
+          bet: stake,
+          payout,
+          won: result === "win",
+          detail: `player:${pTotal} dealer:${dTotal} ${result}`,
+        });
+
+        const msg =
+          result === "win"
+            ? `**You won ${formatCoins(payout - stake)}!**`
+            : result === "push"
+              ? `**Push.** Bet returned.`
+              : `**You lost ${formatCoins(stake)}.**`;
+
+        const finalEmbed = buildEmbed(
+          { ...state, bet: stake },
+          msg,
+          false,
+        ).setColor(
+          result === "win" ? 0x22c55e : result === "push" ? 0xfacc15 : 0xef4444,
+        );
+        const payload = { embeds: [finalEmbed], components: [controls(true)] };
+        if (btn) await btn.update(payload);
+        else await message.edit(payload);
+      } finally {
+        endSession(interaction.user.id);
+        collector.stop("done");
       }
-      const pTotal = handTotal(state.player);
-      const dTotal = handTotal(state.dealer);
-      const stake = doubled ? state.bet * 2n : state.bet;
-
-      let result: "win" | "lose" | "push";
-      let payout = 0n;
-      if (pTotal > 21) {
-        result = "lose";
-      } else if (dTotal > 21 || pTotal > dTotal) {
-        result = "win";
-        payout = stake * 2n;
-      } else if (pTotal === dTotal) {
-        result = "push";
-        payout = stake;
-      } else {
-        result = "lose";
-      }
-
-      if (payout > 0n) await adjustBalance(interaction.user.id, payout);
-      await recordGame({
-        discordId: interaction.user.id,
-        game: "blackjack",
-        bet: stake,
-        payout,
-        won: result === "win",
-        details: { result, pTotal, dTotal, doubled },
-      });
-      await logGamble({
-        discordId: interaction.user.id,
-        game: "blackjack",
-        bet: stake,
-        payout,
-        won: result === "win",
-        detail: `player:${pTotal} dealer:${dTotal} ${result}`,
-      });
-
-      const msg =
-        result === "win"
-          ? `**You won ${formatCoins(payout - stake)}!**`
-          : result === "push"
-            ? `**Push.** Bet returned.`
-            : `**You lost ${formatCoins(stake)}.**`;
-
-      const finalEmbed = buildEmbed(
-        { ...state, bet: stake },
-        msg,
-        false,
-      ).setColor(
-        result === "win" ? 0x22c55e : result === "push" ? 0xfacc15 : 0xef4444,
-      );
-      const payload = { embeds: [finalEmbed], components: [controls(true)] };
-      if (btn) await btn.update(payload);
-      else await message.edit(payload);
-      endSession(interaction.user.id);
-      collector.stop("done");
     };
 
     if (blackjack || dealerBlackjack) {
-      let payout = 0n;
-      let label: string;
-      if (blackjack && !dealerBlackjack) {
-        payout = (state.bet * 5n) / 2n + state.bet;
-        label = `**Blackjack! You won ${formatCoins(payout - state.bet)}.**`;
-        await adjustBalance(interaction.user.id, payout);
-      } else if (!blackjack && dealerBlackjack) {
-        label = `**Dealer blackjack — you lost ${formatCoins(state.bet)}.**`;
-      } else {
-        payout = state.bet;
-        label = "**Push.** Both have blackjack.";
-        await adjustBalance(interaction.user.id, payout);
+      try {
+        let payout = 0n;
+        let label: string;
+        if (blackjack && !dealerBlackjack) {
+          payout = (state.bet * 5n) / 2n + state.bet;
+          label = `**Blackjack! You won ${formatCoins(payout - state.bet)}.**`;
+          await adjustBalance(interaction.user.id, payout);
+        } else if (!blackjack && dealerBlackjack) {
+          label = `**Dealer blackjack — you lost ${formatCoins(state.bet)}.**`;
+        } else {
+          payout = state.bet;
+          label = "**Push.** Both have blackjack.";
+          await adjustBalance(interaction.user.id, payout);
+        }
+        await recordGame({
+          discordId: interaction.user.id,
+          game: "blackjack",
+          bet: state.bet,
+          payout,
+          won: payout > state.bet,
+          details: { instantBJ: true, blackjack, dealerBlackjack },
+        });
+        await logGamble({
+          discordId: interaction.user.id,
+          game: "blackjack",
+          bet: state.bet,
+          payout,
+          won: payout > state.bet,
+          detail: blackjack && dealerBlackjack ? "push BJ" : blackjack ? "natural BJ" : "dealer BJ",
+        });
+        await message.edit({
+          embeds: [
+            buildEmbed(state, label, false).setColor(
+              payout > state.bet ? 0x22c55e : payout === state.bet ? 0xfacc15 : 0xef4444,
+            ),
+          ],
+          components: [controls(true)],
+        });
+      } finally {
+        endSession(interaction.user.id);
       }
-      await recordGame({
-        discordId: interaction.user.id,
-        game: "blackjack",
-        bet: state.bet,
-        payout,
-        won: payout > state.bet,
-        details: { instantBJ: true, blackjack, dealerBlackjack },
-      });
-      await logGamble({
-        discordId: interaction.user.id,
-        game: "blackjack",
-        bet: state.bet,
-        payout,
-        won: payout > state.bet,
-        detail: blackjack && dealerBlackjack ? "push BJ" : blackjack ? "natural BJ" : "dealer BJ",
-      });
-      await message.edit({
-        embeds: [
-          buildEmbed(state, label, false).setColor(
-            payout > state.bet ? 0x22c55e : payout === state.bet ? 0xfacc15 : 0xef4444,
-          ),
-        ],
-        components: [controls(true)],
-      });
-      endSession(interaction.user.id);
       return;
     }
 
