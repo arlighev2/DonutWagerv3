@@ -68,11 +68,19 @@ const command: SlashCommand = {
 
     const wagerReq = BigInt(user.wager_requirement ?? "0");
     if (wagerReq > 0n) {
-      embed.addFields({
-        name: "⚠️ Wager Requirement",
-        value: `Must wager **${formatCoins(wagerReq)}** more before withdrawing`,
-        inline: false,
-      });
+      const withdrawable = balance > wagerReq ? balance - wagerReq : 0n;
+      embed.addFields(
+        {
+          name: "✅ Available to Withdraw",
+          value: formatCoins(withdrawable),
+          inline: true,
+        },
+        {
+          name: "🔒 Locked (coupon)",
+          value: `${formatCoins(wagerReq)} — must gamble this off first`,
+          inline: true,
+        },
+      );
     }
 
     // Only mods see the linked Minecraft account info — and only privately.

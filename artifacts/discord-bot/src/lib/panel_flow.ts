@@ -163,10 +163,23 @@ export async function handlePanelButton(
 
   if (action === "balance") {
     const user = await getOrCreateUser(interaction.user.id);
-    await interaction.reply({
-      content: `Your balance: **${formatCoins(BigInt(user.balance))}**`,
-      flags: MessageFlags.Ephemeral,
-    });
+    const balance = BigInt(user.balance);
+    const wagerReq = BigInt(user.wager_requirement ?? "0");
+    if (wagerReq > 0n) {
+      const withdrawable = balance > wagerReq ? balance - wagerReq : 0n;
+      await interaction.reply({
+        content:
+          `💰 **Balance:** ${formatCoins(balance)}\n` +
+          `✅ **Available to withdraw:** ${formatCoins(withdrawable)}\n` +
+          `🔒 **Locked (coupon):** ${formatCoins(wagerReq)} — must gamble this off first`,
+        flags: MessageFlags.Ephemeral,
+      });
+    } else {
+      await interaction.reply({
+        content: `💰 **Balance:** ${formatCoins(balance)}`,
+        flags: MessageFlags.Ephemeral,
+      });
+    }
     return;
   }
 
@@ -210,13 +223,15 @@ export async function handlePanelButton(
       return;
     }
     if (action === "withdraw") {
+      const balance = BigInt(user.balance);
       const wagerReq = BigInt(user.wager_requirement ?? "0");
-      if (wagerReq > 0n) {
+      const withdrawable = balance > wagerReq ? balance - wagerReq : 0n;
+      if (withdrawable <= 0n) {
         await interaction.reply({
           content:
-            `⚠️ **Wagering requirement not met.**\n` +
-            `You must wager **${formatCoins(wagerReq)}** more before you can withdraw.\n` +
-            `This is from a coupon bonus — play any game to work it off.`,
+            `⚠️ **Nothing available to withdraw right now.**\n` +
+            `Your entire balance of **${formatCoins(balance)}** is locked behind a wagering requirement.\n` +
+            `Wager **${formatCoins(wagerReq)}** more across any game to unlock it.`,
           flags: MessageFlags.Ephemeral,
         });
         return;
@@ -437,19 +452,30 @@ export async function handlePanelModal(
     }
 
     if (action === "withdraw") {
+      const balance = BigInt(user.balance);
       const wagerReq = BigInt(user.wager_requirement ?? "0");
-      if (wagerReq > 0n) {
-        await interaction.editReply({
-          content:
-            `⚠️ **Wagering requirement not met.**\n` +
-            `You must wager **${formatCoins(wagerReq)}** more before you can withdraw.\n` +
-            `Play any game to work it off.`,
-        });
+      const withdrawable = balance > wagerReq ? balance - wagerReq : 0n;
+      if (amount > withdrawable) {
+        if (withdrawable <= 0n) {
+          await interaction.editReply({
+            content:
+              `⚠️ **Nothing available to withdraw.**\n` +
+              `Your entire balance of **${formatCoins(balance)}** is locked behind a wagering requirement.\n` +
+              `Wager **${formatCoins(wagerReq)}** more across any game to unlock it.`,
+          });
+        } else {
+          await interaction.editReply({
+            content:
+              `⚠️ **Amount too high.**\n` +
+              `You can withdraw up to **${formatCoins(withdrawable)}** right now.\n` +
+              `The remaining **${formatCoins(wagerReq)}** is locked — wager it off first by playing any game.`,
+          });
+        }
         return;
       }
-      if (BigInt(user.balance) < amount) {
+      if (amount > balance) {
         await interaction.editReply({
-          content: `Insufficient balance. You have ${formatCoins(BigInt(user.balance))}.`,
+          content: `Insufficient balance. You have ${formatCoins(balance)}.`,
         });
         return;
       }
