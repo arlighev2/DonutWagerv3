@@ -51,18 +51,6 @@ PORT = "8081"
 BASE_PATH = "/__mockup"
 
 [[workflows.workflow]]
-name = "Run Discord Bot"
-mode = "sequential"
-author = "agent"
-
-[workflows.workflow.metadata]
-outputType = "console"
-
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "bash scripts/watchdog-bot.sh"
-
-[[workflows.workflow]]
 name = "Project"
 mode = "parallel"
 author = "agent"
@@ -70,6 +58,17 @@ author = "agent"
 [[workflows.workflow.tasks]]
 task = "workflow.run"
 args = "Run Discord Bot"
+
+[[workflows.workflow]]
+name = "Run Discord Bot"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "bash scripts/watchdog-bot.sh"
+
+[workflows.workflow.metadata]
+outputType = "console"
 
 [agent]
 stack = "PNPM_WORKSPACE"

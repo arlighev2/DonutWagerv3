@@ -125,6 +125,11 @@ export async function initSchema(): Promise<void> {
     );
     CREATE INDEX IF NOT EXISTS idx_pending_deposits_user
       ON bot_pending_deposits(discord_id, status);
+
+    CREATE TABLE IF NOT EXISTS bot_processed_messages (
+      message_id VARCHAR(32) PRIMARY KEY,
+      processed_at TIMESTAMP NOT NULL DEFAULT NOW()
+    );
   `);
 }
 
@@ -704,4 +709,21 @@ export async function setConfig(key: string, value: string): Promise<void> {
 
 export async function deleteConfig(key: string): Promise<void> {
   await pool.query(`DELETE FROM bot_config WHERE key = $1`, [key]);
+}
+
+/**
+ * Atomically claim a payment message ID for processing.
+ * Returns true if this instance is the first to claim it (should process it),
+ * false if another instance already claimed it (skip — duplicate).
+ */
+export async function claimPaymentMessage(messageId: string): Promise<boolean> {
+  try {
+    await pool.query(
+      `INSERT INTO bot_processed_messages (message_id) VALUES ($1)`,
+      [messageId],
+    );
+    return true;
+  } catch {
+    return false;
+  }
 }

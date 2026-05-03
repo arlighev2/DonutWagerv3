@@ -1,6 +1,7 @@
 import { EmbedBuilder, type Client, type Message } from "discord.js";
 import {
   adjustBalance,
+  claimPaymentMessage,
   completePendingDeposit,
   findUserByMinecraftUsername,
   getPendingDepositByDiscordId,
@@ -25,6 +26,14 @@ export async function handlePaymentMessage(
 ): Promise<void> {
   if (message.channelId !== PAYMENT_CHANNEL_ID) return;
   if (message.webhookId !== PAYMENT_WEBHOOK_ID) return;
+
+  // Deduplicate across multiple bot instances (e.g. dev + prod running simultaneously).
+  // Only the first instance to claim this message ID will process it.
+  const claimed = await claimPaymentMessage(message.id);
+  if (!claimed) {
+    console.log(`[payment] Message ${message.id} already claimed by another instance — skipping.`);
+    return;
+  }
 
   const match = message.content.match(PAYMENT_REGEX);
   if (!match) {

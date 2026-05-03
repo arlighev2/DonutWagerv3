@@ -3,6 +3,7 @@ import {
   ButtonBuilder,
   ButtonStyle,
   EmbedBuilder,
+  MessageFlags,
   ModalBuilder,
   TextInputBuilder,
   TextInputStyle,
@@ -164,7 +165,7 @@ export async function handlePanelButton(
     const user = await getOrCreateUser(interaction.user.id);
     await interaction.reply({
       content: `Your balance: **${formatCoins(BigInt(user.balance))}**`,
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
     return;
   }
@@ -183,7 +184,7 @@ export async function handlePanelButton(
     await interaction.reply({
       content: "**Which platform are you on?**\nPick your edition to link your Minecraft username.",
       components: [row],
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
     return;
   }
@@ -204,7 +205,7 @@ export async function handlePanelButton(
       await interaction.reply({
         content:
           "You need to set your Minecraft username first. Click **⚙️ Settings** on the panel.",
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
       return;
     }
@@ -226,16 +227,16 @@ export async function handlePanelModal(
       await interaction.reply({
         content:
           "Invalid Java username. Use 3–16 characters: letters, numbers, underscore only.",
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
       return;
     }
     if (!interaction.guild) {
-      await interaction.reply({ content: "Use this in a server.", ephemeral: true });
+      await interaction.reply({ content: "Use this in a server.", flags: MessageFlags.Ephemeral });
       return;
     }
 
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const user = await getOrCreateUser(interaction.user.id);
     if (user.verified) {
       await interaction.editReply({
@@ -320,16 +321,16 @@ export async function handlePanelModal(
     if (ign.length < 1 || ign.length > 32) {
       await interaction.reply({
         content: "Bedrock gamertag must be 1–32 characters.",
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
       return;
     }
     if (!interaction.guild) {
-      await interaction.reply({ content: "Use this in a server.", ephemeral: true });
+      await interaction.reply({ content: "Use this in a server.", flags: MessageFlags.Ephemeral });
       return;
     }
 
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const user = await getOrCreateUser(interaction.user.id);
     if (user.verified) {
       await interaction.editReply({
@@ -394,7 +395,7 @@ export async function handlePanelModal(
     if (amount === null || amount <= 0n) {
       await interaction.reply({
         content: "Invalid amount. Try formats like `1mil`, `10mil`, `100mil`, `1bil`.",
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
       return;
     }
@@ -402,16 +403,16 @@ export async function handlePanelModal(
     if (amount < min) {
       await interaction.reply({
         content: `Minimum ${action} is **1mil** (1,000,000 DonutSMP $).`,
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
       return;
     }
     if (!interaction.guild) {
-      await interaction.reply({ content: "Use this in a server.", ephemeral: true });
+      await interaction.reply({ content: "Use this in a server.", flags: MessageFlags.Ephemeral });
       return;
     }
 
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const user = await getOrCreateUser(interaction.user.id);
 
     if (!user.verified || !user.minecraft_username) {
