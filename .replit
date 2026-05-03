@@ -54,12 +54,12 @@ name = "Run Discord Bot"
 mode = "sequential"
 author = "agent"
 
+[workflows.workflow.metadata]
+outputType = "console"
+
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "bash scripts/watchdog-bot.sh"
-
-[workflows.workflow.metadata]
-outputType = "console"
 
 [[workflows.workflow]]
 name = "Project"
