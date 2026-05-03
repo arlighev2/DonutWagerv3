@@ -118,12 +118,11 @@ const command: SlashCommand = {
         .addUserOption((o) =>
           o.setName("user").setDescription("User").setRequired(true),
         )
-        .addIntegerOption((o) =>
+        .addStringOption((o) =>
           o
             .setName("amount")
-            .setDescription("New balance")
-            .setRequired(true)
-            .setMinValue(0),
+            .setDescription("New balance — supports abbreviations: 1m, 50m, 1.5b, etc.")
+            .setRequired(true),
         ),
     )
     .addSubcommand((sc) =>
@@ -703,10 +702,15 @@ const command: SlashCommand = {
 
     if (sub === "setbalance") {
       const target = interaction.options.getUser("user", true);
-      const amount = interaction.options.getInteger("amount", true);
+      const rawAmount = interaction.options.getString("amount", true);
+      const parsed = parseAmount(rawAmount);
+      if (parsed === null || parsed < 0n) {
+        await interaction.reply({ content: "Invalid amount. Use a number or abbreviation like `50m`, `1.5b`, `500k`.", ephemeral: true });
+        return;
+      }
       const existing = await getOrCreateUser(target.id);
       const oldBal = BigInt(existing.balance);
-      const newBal = BigInt(amount);
+      const newBal = parsed;
       await setBalance(target.id, newBal);
       const delta = newBal - oldBal;
       const deltaStr =
