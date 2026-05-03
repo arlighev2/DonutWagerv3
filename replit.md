@@ -18,7 +18,8 @@ plus the standard API server scaffold.
 
 ## Discord Bot (`artifacts/discord-bot`)
 
-Long-running Node.js process registered as the **Discord Bot** workflow.
+Long-running Node.js process. Started via `Start Discord Bot` workflow in dev,
+or `scripts/start-production.sh` in production (runs health check server + bot directly).
 Uses two secrets: `DISCORD_BOT_TOKEN`, `DISCORD_CLIENT_ID`.
 
 ### Commands
@@ -30,17 +31,18 @@ Uses two secrets: `DISCORD_BOT_TOKEN`, `DISCORD_CLIENT_ID`.
 
 ### House edge
 
-All games consult `src/lib/house.ts`. The two tunables are `HOUSE_WIN_RATE`
-(default `0.56`) and `BIG_BET_HOUSE_RATE` (default `0.59` for huge bets).
-Each round calls `houseShouldWin(bet)` to flag the round for the house.
-A second helper, `riggingBias(bet) = max(0, (rate - 0.5) * 2)`, scales how
-hard the per-action rigging swings inside individual games (mines tile
-relocation, blackjack card cherry-picking, towers survival threshold). At
-`HOUSE_WIN_RATE = 0.5` `riggingBias` is exactly `0`, so every game becomes
-fully fair.
+Blackjack uses its own rigging in `blackjack.ts`:
+- `HOUSE_WIN_RATE = 0.55` (base, bets under 49M)
+- `BIG_BET_HOUSE_RATE = 0.58` (49M–74M)
+- `WHALE_BET_HOUSE_RATE = 0.61` (74M–99M)
+- `MEGA_WHALE_BET_HOUSE_RATE = 0.63` (99M+)
 
-`/dice` is Stake-style: roll is a decimal `0.01–100.00`, player picks a
-target between `1.00–99.00` and Under/Over. Multiplier = `99/winChance`.
+Mines and Towers use `src/lib/house.ts`.
+
+### Bet limits
+
+- Minimum: **10,000 coins (10k)** — all games
+- Maximum: **150,000,000 coins (150M)** — all games (`MAX_BET` in `format.ts`)
 
 ### Withdraw flow
 
@@ -80,11 +82,75 @@ ticket — withdraw uses the same debit-now flow as the slash command.
 - `bot_config` — key/value config (mod role, ticket category)
 - `bot_balance_ledger` — every balance change with source + detail
 - `bot_pending_withdrawals` — open withdrawal tickets (one per channel)
+- `bot_pending_deposits` — open deposit tickets (one per channel)
+- `bot_processed_messages` — deduplication table for payment webhook messages
 - `bot_coupons` / `bot_coupon_redemptions` — promo codes
 - `game_log` — every bet logged for analytics
+
+### Duplicate bot warning
+
+**Never run the `Start Discord Bot` dev workflow while the published production
+bot is live.** Both share the same `DISCORD_BOT_TOKEN` — Discord delivers every
+interaction to both instances, causing 10062 Unknown Interaction errors and
+duplicate responses.
 
 ## Key Commands
 
 - `pnpm run typecheck` — full typecheck across all packages
 - `pnpm --filter @workspace/discord-bot run start` — run the bot locally
 - `pnpm --filter @workspace/api-server run dev` — run the API server locally
+
+## Saved: watchdog-bot.sh
+
+The user removed the watchdog in favour of Replit autoscale + UptimeRobot.
+Restore by creating `scripts/watchdog-bot.sh` with the content below and
+changing `start-production.sh` line 17 back to `exec bash scripts/watchdog-bot.sh`.
+
+```bash
+#!/bin/bash
+
+RESTART_DELAY=180
+SHUTTING_DOWN=0
+LOG_CHANNEL_ID="1500275139311439942"
+
+send_embed() {
+  local title="$1"
+  local description="$2"
+  local color="$3"
+  curl -s -X POST "https://discord.com/api/v10/channels/${LOG_CHANNEL_ID}/messages" \
+    -H "Authorization: Bot ${DISCORD_BOT_TOKEN}" \
+    -H "Content-Type: application/json" \
+    -d "{\"embeds\":[{\"title\":\"${title}\",\"description\":\"${description}\",\"color\":${color},\"timestamp\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}]}" \
+    > /dev/null 2>&1
+}
+
+cleanup() {
+  SHUTTING_DOWN=1
+  echo "[watchdog] $(date '+%Y-%m-%d %H:%M:%S') — Stopped by signal."
+  send_embed "Bot Stopped" "The workflow was stopped manually." "6316128"
+  exit 0
+}
+
+trap cleanup SIGTERM SIGINT
+
+while true; do
+  echo "[watchdog] $(date '+%Y-%m-%d %H:%M:%S') — Starting Discord bot..."
+
+  pnpm --filter @workspace/discord-bot run start
+  EXIT_CODE=$?
+
+  if [ $SHUTTING_DOWN -eq 1 ]; then
+    exit 0
+  fi
+
+  echo "[watchdog] $(date '+%Y-%m-%d %H:%M:%S') — Bot stopped (code: $EXIT_CODE). Restarting in ${RESTART_DELAY}s..."
+
+  if [ $EXIT_CODE -ne 0 ]; then
+    send_embed "Bot Crashed" "Exited with code \`${EXIT_CODE}\`. Restarting in ${RESTART_DELAY}s..." "15548997"
+  else
+    send_embed "Bot Restarting" "Bot exited cleanly. Restarting in ${RESTART_DELAY}s..." "16776960"
+  fi
+
+  sleep $RESTART_DELAY
+done
+```

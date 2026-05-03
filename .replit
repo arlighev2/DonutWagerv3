@@ -63,12 +63,12 @@ args = "Start Discord Bot"
 name = "Start Discord Bot"
 author = "agent"
 
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "bash scripts/watchdog-bot.sh"
-
 [workflows.workflow.metadata]
 outputType = "console"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/discord-bot run start"
 
 [agent]
 stack = "PNPM_WORKSPACE"

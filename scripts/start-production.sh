@@ -1,7 +1,7 @@
 #!/bin/bash
-# Production entry point — runs the Discord bot watchdog.
+# Production entry point — runs the Discord bot directly.
 # A minimal HTTP server on $PORT handles health checks so Replit
-# can verify the process is alive.
+# can verify the process is alive (ping this with UptimeRobot).
 
 PORT="${PORT:-8080}"
 
@@ -14,4 +14,4 @@ http.createServer((req, res) => {
 }).listen($PORT, () => console.log('[health] listening on port $PORT'));
 " &
 
-exec bash scripts/watchdog-bot.sh
+exec pnpm --filter @workspace/discord-bot run start
