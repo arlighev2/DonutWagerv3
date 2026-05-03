@@ -11,7 +11,12 @@ pool.on("error", (err) => {
 });
 
 export async function initSchema(): Promise<void> {
-  await pool.query(`
+  // Acquire a session-level advisory lock so concurrent bot startups (e.g. during
+  // a rolling redeploy) never race on CREATE TABLE and crash with a pg_type conflict.
+  const client = await pool.connect();
+  try {
+    await client.query("SELECT pg_advisory_lock(8675309)");
+    await client.query(`
     CREATE TABLE IF NOT EXISTS bot_users (
       discord_id VARCHAR(32) PRIMARY KEY,
       minecraft_username VARCHAR(64),
@@ -131,6 +136,10 @@ export async function initSchema(): Promise<void> {
       processed_at TIMESTAMP NOT NULL DEFAULT NOW()
     );
   `);
+  } finally {
+    await client.query("SELECT pg_advisory_unlock(8675309)");
+    client.release();
+  }
 }
 
 export interface BotCoupon {

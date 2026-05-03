@@ -18,13 +18,13 @@ import type { SlashCommand } from "../lib/types.js";
 import { endSession, getSession, startSession } from "../games/sessions.js";
 
 // ── House edge ───────────────────────────────────────────────────────────────
-const HOUSE_WIN_RATE = 0.54;
+const HOUSE_WIN_RATE = 0.55;
 const BIG_BET_THRESHOLD = 49_000_000n;
-const BIG_BET_HOUSE_RATE = 0.57;
+const BIG_BET_HOUSE_RATE = 0.58;
 const WHALE_BET_THRESHOLD = 74_000_000n;
-const WHALE_BET_HOUSE_RATE = 0.59;
+const WHALE_BET_HOUSE_RATE = 0.61;
 const MEGA_WHALE_BET_THRESHOLD = 99_000_000n;
-const MEGA_WHALE_BET_HOUSE_RATE = 0.61;
+const MEGA_WHALE_BET_HOUSE_RATE = 0.63;
 
 function houseRate(bet: bigint): number {
   if (bet >= MEGA_WHALE_BET_THRESHOLD) return MEGA_WHALE_BET_HOUSE_RATE;
@@ -246,7 +246,8 @@ const command: SlashCommand = {
         let payout = 0n;
         let label: string;
         if (isPlayerBJ && !isDealerBJ) {
-          payout = (bet * 5n) / 2n + bet;
+          // 3:2 payout — player gets back their bet plus 1.5× their bet
+          payout = (bet * 5n) / 2n;
           label = `**Blackjack! You won ${formatCoins(payout - bet)}.**`;
           await adjustBalance(interaction.user.id, payout);
         } else if (!isPlayerBJ && isDealerBJ) {
@@ -264,7 +265,7 @@ const command: SlashCommand = {
         await logGamble({
           discordId: interaction.user.id, game: "blackjack", bet, payout,
           won: payout > bet,
-          detail: isPlayerBJ && isDealerBJ ? "push BJ" : isPlayerBJ ? "natural BJ" : "dealer BJ",
+          detail: isPlayerBJ && isDealerBJ ? "push BJ" : isPlayerBJ ? "natural BJ 3:2" : "dealer BJ",
         });
         await interaction.editReply({
           embeds: [
@@ -299,6 +300,7 @@ const command: SlashCommand = {
 
     const finishHand = async (btn: ButtonInteraction | null): Promise<void> => {
       try {
+        // Dealer plays — stands on all 17s
         while (handTotal(state.dealer) < 17) {
           state.dealer.push(drawBiased(state, false));
         }
