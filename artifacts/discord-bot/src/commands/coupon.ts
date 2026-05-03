@@ -50,10 +50,10 @@ const command: SlashCommand = {
         .addStringOption((o) =>
           o
             .setName("type")
-            .setDescription("gamble = must wager before withdrawing | nongamble = free to withdraw instantly")
+            .setDescription("gamble = must gamble before withdraw | nongamble = free to withdraw")
             .setRequired(true)
             .addChoices(
-              { name: "gamble — must wager first", value: "gamble" },
+              { name: "gamble — must gamble before withdraw", value: "gamble" },
               { name: "nongamble — withdraw freely", value: "nongamble" },
             ),
         )
@@ -133,9 +133,9 @@ const command: SlashCommand = {
         ? `<t:${Math.floor(new Date(coupon.expires_at).getTime() / 1000)}:R>`
         : "Never";
 
-      const typeLabel = coupon.coupon_type === "gamble"
-        ? "🎲 Gamble (must wager before withdrawing)"
-        : "✅ Non-gamble (withdraw freely)";
+      const requirementLabel = coupon.coupon_type === "gamble"
+        ? "Must gamble before withdraw"
+        : "No gamble required";
 
       await logAdminAction({
         actorId: interaction.user.id,
@@ -166,8 +166,8 @@ const command: SlashCommand = {
                 inline: true,
               },
               {
-                name: "Type",
-                value: typeLabel,
+                name: "Requirement",
+                value: requirementLabel,
                 inline: true,
               },
               {

@@ -171,7 +171,7 @@ export async function handlePanelButton(
         content:
           `💰 **Balance:** ${formatCoins(balance)}\n` +
           `✅ **Available to withdraw:** ${formatCoins(withdrawable)}\n` +
-          `🔒 **Locked (coupon):** ${formatCoins(wagerReq)} — must gamble this off first`,
+          `🔒 **Locked:** ${formatCoins(wagerReq)} — must gamble before withdraw`,
         flags: MessageFlags.Ephemeral,
       });
     } else {
@@ -230,8 +230,8 @@ export async function handlePanelButton(
         await interaction.reply({
           content:
             `⚠️ **Nothing available to withdraw right now.**\n` +
-            `Your entire balance of **${formatCoins(balance)}** is locked behind a wagering requirement.\n` +
-            `Wager **${formatCoins(wagerReq)}** more across any game to unlock it.`,
+            `Your balance is locked behind a wagering requirement.\n` +
+            `Must gamble before withdraw.`,
           flags: MessageFlags.Ephemeral,
         });
         return;
@@ -460,15 +460,15 @@ export async function handlePanelModal(
           await interaction.editReply({
             content:
               `⚠️ **Nothing available to withdraw.**\n` +
-              `Your entire balance of **${formatCoins(balance)}** is locked behind a wagering requirement.\n` +
-              `Wager **${formatCoins(wagerReq)}** more across any game to unlock it.`,
+              `Your balance is locked behind a wagering requirement.\n` +
+              `Must gamble before withdraw.`,
           });
         } else {
           await interaction.editReply({
             content:
               `⚠️ **Amount too high.**\n` +
               `You can withdraw up to **${formatCoins(withdrawable)}** right now.\n` +
-              `The remaining **${formatCoins(wagerReq)}** is locked — wager it off first by playing any game.`,
+              `The remaining **${formatCoins(wagerReq)}** is locked — must gamble before withdraw.`,
           });
         }
         return;
@@ -539,7 +539,6 @@ export async function handlePanelModal(
       return;
     }
 
-    // Withdraw — auto-debit + pending row + confirm buttons.
     const newBal = await adjustBalance(interaction.user.id, -amount);
     await recordBalanceEvent({
       discordId: interaction.user.id,

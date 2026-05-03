@@ -47,10 +47,9 @@ const command: SlashCommand = {
       return;
     }
 
-    const isGamble = result.couponType === "gamble";
-    const wagerLine = isGamble
-      ? `\n\n⚠️ **Wagering requirement:** You must wager **${formatCoins(result.amount)}** before you can withdraw.\nPlay any game — every bet chips away at it.`
-      : `\n\n✅ **No wagering requirement** — you can withdraw this balance freely.`;
+    const requirementLine = result.couponType === "gamble"
+      ? `\n\n⚠️ Must gamble before withdraw.`
+      : `\n\n✅ No gamble required — you can withdraw this balance freely.`;
 
     await interaction.reply({
       embeds: [
@@ -59,7 +58,7 @@ const command: SlashCommand = {
           .setTitle("Coupon Redeemed")
           .setDescription(
             `You received ${formatCoins(result.amount)}.\nNew balance: ${formatCoins(result.newBalance)}` +
-            wagerLine,
+            requirementLine,
           )
           .setFooter({ text: `Code: ${code}` }),
       ],

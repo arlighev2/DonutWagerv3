@@ -76,14 +76,13 @@ const command: SlashCommand = {
           inline: true,
         },
         {
-          name: "🔒 Locked (coupon)",
-          value: `${formatCoins(wagerReq)} — must gamble this off first`,
+          name: "🔒 Locked",
+          value: `${formatCoins(wagerReq)} — must gamble before withdraw`,
           inline: true,
         },
       );
     }
 
-    // Only mods see the linked Minecraft account info — and only privately.
     if (viewerIsMod && user.minecraft_username) {
       embed.addFields({
         name: "Linked Minecraft (mod-only)",
