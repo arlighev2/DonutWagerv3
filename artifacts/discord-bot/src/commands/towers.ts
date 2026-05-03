@@ -4,13 +4,14 @@ import {
   ButtonStyle,
   ComponentType,
   EmbedBuilder,
+  MessageFlags,
   SlashCommandBuilder,
   type ButtonInteraction,
   type ChatInputCommandInteraction,
 } from "discord.js";
 import { adjustBalance, getOrCreateUser, recordGame } from "../lib/db.js";
-import { formatCoins } from "../lib/format.js";
-import { antiSpam, requireVerified, resolveBet } from "../lib/guards.js";
+import { formatCoins, parseBet } from "../lib/format.js";
+import { antiSpam } from "../lib/guards.js";
 import { houseShouldWin, riggingBias } from "../lib/house.js";
 import { logGamble } from "../lib/gamblelog.js";
 import type { SlashCommand } from "../lib/types.js";
@@ -148,30 +149,53 @@ const command: SlashCommand = {
         ),
     ),
   async execute(interaction: ChatInputCommandInteraction): Promise<void> {
+    // ── Fast synchronous guards (before defer) ──────────────────────────────
     if (!antiSpam(interaction.user.id)) {
-      await interaction.reply({ content: "Slow down.", ephemeral: true });
+      await interaction.reply({ content: "Slow down.", flags: MessageFlags.Ephemeral });
       return;
     }
-    const verified = await requireVerified(interaction);
-    if (!verified) return;
     if (getSession(interaction.user.id)) {
-      await interaction.reply({
-        content: "Finish your active game first.",
-        ephemeral: true,
-      });
+      await interaction.reply({ content: "Finish your active game first.", flags: MessageFlags.Ephemeral });
       return;
     }
 
     const rawBet = interaction.options.getString("bet", true);
     const difficulty =
-      (interaction.options.getString("difficulty") as Difficulty | null) ??
-      "medium";
+      (interaction.options.getString("difficulty") as Difficulty | null) ?? "medium";
     const cols = DIFFICULTY_COLS[difficulty];
-    const user = await getOrCreateUser(interaction.user.id);
-    const bet = await resolveBet(interaction, user, rawBet);
-    if (!bet) return;
 
-    startSession(interaction.user.id, "towers");
+    // ── Defer before any DB work ────────────────────────────────────────────
+    await interaction.deferReply();
+
+    const user = await getOrCreateUser(interaction.user.id);
+
+    if (!user.verified) {
+      await interaction.editReply({ content: "You must verify before gambling. Use `/verify minecraft:<username>`." });
+      return;
+    }
+
+    const balance = BigInt(user.balance);
+    const betParsed = parseBet(rawBet, balance);
+
+    if (!betParsed || betParsed <= 0n) {
+      await interaction.editReply({ content: "Invalid bet. Try a number, `all`, `half`, or values like `100k`, `5mil`, `1bil`." });
+      return;
+    }
+    if (betParsed < 10_000n) {
+      await interaction.editReply({ content: "Minimum bet is **10,000 coins** (10k)." });
+      return;
+    }
+    if (betParsed > balance) {
+      await interaction.editReply({ content: `Not enough coins. Your balance is ${formatCoins(balance)}.` });
+      return;
+    }
+
+    const bet = betParsed;
+
+    if (!startSession(interaction.user.id, "towers")) {
+      await interaction.editReply({ content: "Finish your active game first." });
+      return;
+    }
     await adjustBalance(interaction.user.id, -bet);
 
     const refundAndAbort = async (msg: string): Promise<void> => {
@@ -181,14 +205,8 @@ const command: SlashCommand = {
         endSession(interaction.user.id);
       }
       try {
-        if (interaction.deferred || interaction.replied) {
-          await interaction.followUp({ content: msg, ephemeral: true });
-        } else {
-          await interaction.reply({ content: msg, ephemeral: true });
-        }
-      } catch {
-        /* ignore */
-      }
+        await interaction.editReply({ content: msg });
+      } catch { /* ignore */ }
     };
 
     const state: TowersState = {
@@ -245,27 +263,16 @@ const command: SlashCommand = {
         );
     };
 
-    let reply;
+    let message;
     try {
-      reply = await interaction.reply({
-        embeds: [
-          buildEmbed("Pick a tile in the bottom row.", multiplierFor(0, cols)),
-        ],
+      await interaction.editReply({
+        embeds: [buildEmbed("Pick a tile in the bottom row.", multiplierFor(0, cols))],
         components: [...buildRows(state, false), cashoutDisabled],
-        withResponse: true,
       });
+      message = await interaction.fetchReply();
     } catch (err) {
       console.error("[towers] failed to send game message:", err);
-      await refundAndAbort(
-        "Couldn't start the game (Discord error). Your bet was refunded.",
-      );
-      return;
-    }
-    const message = reply.resource?.message;
-    if (!message) {
-      await refundAndAbort(
-        "Couldn't start the game. Your bet was refunded — please try again.",
-      );
+      await refundAndAbort("Couldn't start the game. Your bet was refunded.");
       return;
     }
 
