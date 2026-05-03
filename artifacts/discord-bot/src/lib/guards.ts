@@ -1,7 +1,7 @@
 import type { ChatInputCommandInteraction } from "discord.js";
-import { EmbedBuilder } from "discord.js";
+import { EmbedBuilder, MessageFlags } from "discord.js";
 import { getOrCreateUser, type BotUser } from "./db.js";
-import { formatCoins, parseBet } from "./format.js";
+import { formatCoins, MAX_BET, parseBet } from "./format.js";
 
 export async function requireVerified(
   interaction: ChatInputCommandInteraction,
@@ -48,7 +48,14 @@ export async function resolveBet(
   if (bet < 10_000n) {
     await interaction.reply({
       content: "Minimum bet is **10,000 coins** (10k).",
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
+    });
+    return null;
+  }
+  if (bet > MAX_BET) {
+    await interaction.reply({
+      content: `Maximum bet is **150,000,000 coins** (150M).`,
+      flags: MessageFlags.Ephemeral,
     });
     return null;
   }

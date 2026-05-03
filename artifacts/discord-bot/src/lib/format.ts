@@ -1,5 +1,6 @@
 export const CURRENCY_EMOJI = "🪙";
 export const CURRENCY_NAME = "coins";
+export const MAX_BET = 150_000_000n;
 
 export function formatCoins(amount: bigint | number): string {
   const n = typeof amount === "bigint" ? Number(amount) : amount;

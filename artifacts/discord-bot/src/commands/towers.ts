@@ -10,7 +10,7 @@ import {
   type ChatInputCommandInteraction,
 } from "discord.js";
 import { adjustBalance, getOrCreateUser, recordGame } from "../lib/db.js";
-import { formatCoins, parseBet } from "../lib/format.js";
+import { formatCoins, MAX_BET, parseBet } from "../lib/format.js";
 import { antiSpam } from "../lib/guards.js";
 import { houseShouldWin, riggingBias } from "../lib/house.js";
 import { logGamble } from "../lib/gamblelog.js";
@@ -183,6 +183,10 @@ const command: SlashCommand = {
     }
     if (betParsed < 10_000n) {
       await interaction.editReply({ content: "Minimum bet is **10,000 coins** (10k)." });
+      return;
+    }
+    if (betParsed > MAX_BET) {
+      await interaction.editReply({ content: `Maximum bet is **150,000,000 coins** (150M).` });
       return;
     }
     if (betParsed > balance) {
