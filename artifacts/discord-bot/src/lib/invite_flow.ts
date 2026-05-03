@@ -19,12 +19,12 @@ export const MEMBER_ROLE_ID = "1498005198990344322";
 // ─── INVITE REWARD RATE ───────────────────────────────────────────────────────
 // Change this number to adjust how many coins each valid invite is worth.
 // Examples: 10_000_000n = 10m | 15_000_000n = 15m | 5_000_000n = 5m
-export const COINS_PER_INVITE = 10_000_000n;
+export const COINS_PER_INVITE = 5_000_000n;
 // ─────────────────────────────────────────────────────────────────────────────
 // ─── CLAIM MILESTONES ─────────────────────────────────────────────────────────
 // Change these numbers to adjust how many valid invites are needed per claim.
 // The last number repeats for every claim beyond the list length.
-export const CLAIM_TIERS = [3, 5, 10, 15, 20];
+export const CLAIM_TIERS = [3, 5, 10, 15, 20, 25];
 // ─────────────────────────────────────────────────────────────────────────────
 
 export function getNextClaimMin(claimCount: number): number {
