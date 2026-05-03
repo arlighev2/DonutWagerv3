@@ -47,15 +47,19 @@ const command: SlashCommand = {
       return;
     }
 
+    const isGamble = result.couponType === "gamble";
+    const wagerLine = isGamble
+      ? `\n\n⚠️ **Wagering requirement:** You must wager **${formatCoins(result.amount)}** before you can withdraw.\nPlay any game — every bet chips away at it.`
+      : `\n\n✅ **No wagering requirement** — you can withdraw this balance freely.`;
+
     await interaction.reply({
       embeds: [
         new EmbedBuilder()
           .setColor(0x22c55e)
           .setTitle("Coupon Redeemed")
           .setDescription(
-            `You received ${formatCoins(result.amount)}.\nNew balance: ${formatCoins(result.newBalance)}\n\n` +
-            `⚠️ **Wagering requirement:** You must wager **${formatCoins(result.amount)}** before you can withdraw.\n` +
-            `Play any game — every bet chips away at it.`,
+            `You received ${formatCoins(result.amount)}.\nNew balance: ${formatCoins(result.newBalance)}` +
+            wagerLine,
           )
           .setFooter({ text: `Code: ${code}` }),
       ],

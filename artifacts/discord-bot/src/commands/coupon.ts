@@ -47,6 +47,16 @@ const command: SlashCommand = {
             .setMinValue(1)
             .setMaxValue(1_000_000),
         )
+        .addStringOption((o) =>
+          o
+            .setName("type")
+            .setDescription("gamble = must wager before withdrawing | nongamble = free to withdraw instantly")
+            .setRequired(true)
+            .addChoices(
+              { name: "gamble — must wager first", value: "gamble" },
+              { name: "nongamble — withdraw freely", value: "nongamble" },
+            ),
+        )
         .addIntegerOption((o) =>
           o
             .setName("expires_in_hours")
@@ -99,6 +109,7 @@ const command: SlashCommand = {
         return;
       }
       const maxUses = interaction.options.getInteger("max_uses", true);
+      const couponType = interaction.options.getString("type", true) as "gamble" | "nongamble";
       const hours = interaction.options.getInteger("expires_in_hours");
       const expiresAt = hours ? new Date(Date.now() + hours * 3600 * 1000) : null;
 
@@ -108,6 +119,7 @@ const command: SlashCommand = {
         maxUses,
         expiresAt,
         createdBy: interaction.user.id,
+        couponType,
       });
       if (!coupon) {
         await interaction.reply({
@@ -121,13 +133,17 @@ const command: SlashCommand = {
         ? `<t:${Math.floor(new Date(coupon.expires_at).getTime() / 1000)}:R>`
         : "Never";
 
+      const typeLabel = coupon.coupon_type === "gamble"
+        ? "🎲 Gamble (must wager before withdrawing)"
+        : "✅ Non-gamble (withdraw freely)";
+
       await logAdminAction({
         actorId: interaction.user.id,
         actorTag: interaction.user.tag,
         action: "Coupon Created",
         amount: BigInt(coupon.amount),
         detail:
-          `Code: \`${coupon.code}\` · Max uses: ${coupon.max_uses}` +
+          `Code: \`${coupon.code}\` · Type: ${coupon.coupon_type} · Max uses: ${coupon.max_uses}` +
           (coupon.expires_at
             ? ` · Expires: <t:${Math.floor(new Date(coupon.expires_at).getTime() / 1000)}:R>`
             : " · No expiry") +
@@ -147,6 +163,11 @@ const command: SlashCommand = {
               {
                 name: "Amount",
                 value: formatCoins(BigInt(coupon.amount)),
+                inline: true,
+              },
+              {
+                name: "Type",
+                value: typeLabel,
                 inline: true,
               },
               {
@@ -196,7 +217,8 @@ const command: SlashCommand = {
         const expires = c.expires_at
           ? ` · expires <t:${Math.floor(new Date(c.expires_at).getTime() / 1000)}:R>`
           : "";
-        return `\`${c.code}\` — ${formatCoins(BigInt(c.amount))} · ${c.uses_count}/${c.max_uses} used · ${status}${expires}`;
+        const typeTag = c.coupon_type === "nongamble" ? " · ✅ free" : " · 🎲 gamble";
+        return `\`${c.code}\` — ${formatCoins(BigInt(c.amount))} · ${c.uses_count}/${c.max_uses} used · ${status}${typeTag}${expires}`;
       });
       await interaction.reply({
         embeds: [

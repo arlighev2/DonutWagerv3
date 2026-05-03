@@ -138,6 +138,9 @@ export async function initSchema(): Promise<void> {
 
     ALTER TABLE bot_users
       ADD COLUMN IF NOT EXISTS wager_requirement BIGINT NOT NULL DEFAULT 0;
+
+    ALTER TABLE bot_coupons
+      ADD COLUMN IF NOT EXISTS coupon_type VARCHAR(16) NOT NULL DEFAULT 'gamble';
   `);
   } finally {
     await client.query("SELECT pg_advisory_unlock(8675309)");
@@ -148,6 +151,7 @@ export async function initSchema(): Promise<void> {
 export interface BotCoupon {
   code: string;
   amount: string;
+  coupon_type: string;
   max_uses: number;
   uses_count: number;
   expires_at: Date | null;
@@ -161,14 +165,15 @@ export async function createCoupon(params: {
   maxUses: number;
   expiresAt: Date | null;
   createdBy: string;
+  couponType: "gamble" | "nongamble";
 }): Promise<BotCoupon | null> {
-  const { code, amount, maxUses, expiresAt, createdBy } = params;
+  const { code, amount, maxUses, expiresAt, createdBy, couponType } = params;
   try {
     const r = await pool.query<BotCoupon>(
-      `INSERT INTO bot_coupons (code, amount, max_uses, expires_at, created_by)
-         VALUES ($1, $2, $3, $4, $5)
+      `INSERT INTO bot_coupons (code, amount, max_uses, expires_at, created_by, coupon_type)
+         VALUES ($1, $2, $3, $4, $5, $6)
          RETURNING *`,
-      [code, amount.toString(), maxUses, expiresAt, createdBy],
+      [code, amount.toString(), maxUses, expiresAt, createdBy, couponType],
     );
     return r.rows[0] ?? null;
   } catch {
@@ -197,7 +202,7 @@ export async function deleteCoupon(code: string): Promise<boolean> {
 }
 
 export type RedeemResult =
-  | { ok: true; amount: bigint; newBalance: bigint }
+  | { ok: true; amount: bigint; newBalance: bigint; couponType: string }
   | {
       ok: false;
       reason:
@@ -256,12 +261,18 @@ export async function redeemCoupon(
       `UPDATE bot_coupons SET uses_count = uses_count + 1 WHERE code = $1`,
       [code],
     );
+    const isGamble = coupon.coupon_type === "gamble";
     const balRes = await client.query<{ balance: string }>(
-      `UPDATE bot_users
-         SET balance = balance + $2,
-             wager_requirement = wager_requirement + $2
-       WHERE discord_id = $1
-         RETURNING balance`,
+      isGamble
+        ? `UPDATE bot_users
+             SET balance = balance + $2,
+                 wager_requirement = wager_requirement + $2
+           WHERE discord_id = $1
+             RETURNING balance`
+        : `UPDATE bot_users
+             SET balance = balance + $2
+           WHERE discord_id = $1
+             RETURNING balance`,
       [discordId, coupon.amount],
     );
     await client.query(
@@ -274,6 +285,7 @@ export async function redeemCoupon(
       ok: true,
       amount: BigInt(coupon.amount),
       newBalance: BigInt(balRes.rows[0]!.balance),
+      couponType: coupon.coupon_type,
     };
   } catch (err) {
     await client.query("ROLLBACK").catch(() => {});
