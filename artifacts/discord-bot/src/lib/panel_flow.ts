@@ -209,6 +209,19 @@ export async function handlePanelButton(
       });
       return;
     }
+    if (action === "withdraw") {
+      const wagerReq = BigInt(user.wager_requirement ?? "0");
+      if (wagerReq > 0n) {
+        await interaction.reply({
+          content:
+            `⚠️ **Wagering requirement not met.**\n` +
+            `You must wager **${formatCoins(wagerReq)}** more before you can withdraw.\n` +
+            `This is from a coupon bonus — play any game to work it off.`,
+          flags: MessageFlags.Ephemeral,
+        });
+        return;
+      }
+    }
     await interaction.showModal(amountModal(action));
     return;
   }
@@ -423,11 +436,23 @@ export async function handlePanelModal(
       return;
     }
 
-    if (action === "withdraw" && BigInt(user.balance) < amount) {
-      await interaction.editReply({
-        content: `Insufficient balance. You have ${formatCoins(BigInt(user.balance))}.`,
-      });
-      return;
+    if (action === "withdraw") {
+      const wagerReq = BigInt(user.wager_requirement ?? "0");
+      if (wagerReq > 0n) {
+        await interaction.editReply({
+          content:
+            `⚠️ **Wagering requirement not met.**\n` +
+            `You must wager **${formatCoins(wagerReq)}** more before you can withdraw.\n` +
+            `Play any game to work it off.`,
+        });
+        return;
+      }
+      if (BigInt(user.balance) < amount) {
+        await interaction.editReply({
+          content: `Insufficient balance. You have ${formatCoins(BigInt(user.balance))}.`,
+        });
+        return;
+      }
     }
 
     const ticket = await createTicketChannel({

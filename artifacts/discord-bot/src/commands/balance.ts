@@ -66,6 +66,15 @@ const command: SlashCommand = {
         { name: "Win Rate", value: `${winRate}%`, inline: true },
       );
 
+    const wagerReq = BigInt(user.wager_requirement ?? "0");
+    if (wagerReq > 0n) {
+      embed.addFields({
+        name: "⚠️ Wager Requirement",
+        value: `Must wager **${formatCoins(wagerReq)}** more before withdrawing`,
+        inline: false,
+      });
+    }
+
     // Only mods see the linked Minecraft account info — and only privately.
     if (viewerIsMod && user.minecraft_username) {
       embed.addFields({

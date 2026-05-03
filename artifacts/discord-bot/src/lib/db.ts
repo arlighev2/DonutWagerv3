@@ -135,6 +135,9 @@ export async function initSchema(): Promise<void> {
       message_id VARCHAR(32) PRIMARY KEY,
       processed_at TIMESTAMP NOT NULL DEFAULT NOW()
     );
+
+    ALTER TABLE bot_users
+      ADD COLUMN IF NOT EXISTS wager_requirement BIGINT NOT NULL DEFAULT 0;
   `);
   } finally {
     await client.query("SELECT pg_advisory_unlock(8675309)");
@@ -254,7 +257,10 @@ export async function redeemCoupon(
       [code],
     );
     const balRes = await client.query<{ balance: string }>(
-      `UPDATE bot_users SET balance = balance + $2 WHERE discord_id = $1
+      `UPDATE bot_users
+         SET balance = balance + $2,
+             wager_requirement = wager_requirement + $2
+       WHERE discord_id = $1
          RETURNING balance`,
       [discordId, coupon.amount],
     );
@@ -283,6 +289,7 @@ export interface BotUser {
   minecraft_username: string | null;
   verified: boolean;
   balance: string;
+  wager_requirement: string;
   total_wagered: string;
   total_won: string;
   total_lost: string;
@@ -331,6 +338,7 @@ export async function resetUserStats(discordId: string): Promise<boolean> {
   const r = await pool.query(
     `UPDATE bot_users SET
        balance = 0,
+       wager_requirement = 0,
        total_wagered = 0,
        total_won = 0,
        total_lost = 0,
@@ -407,6 +415,7 @@ export async function recordGame(params: {
   await pool.query(
     `UPDATE bot_users
        SET total_wagered = total_wagered + $2,
+           wager_requirement = GREATEST(0, wager_requirement - $2),
            total_won = total_won + $3,
            total_lost = total_lost + $4,
            games_played = games_played + 1,

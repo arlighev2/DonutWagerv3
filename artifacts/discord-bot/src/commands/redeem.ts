@@ -53,7 +53,9 @@ const command: SlashCommand = {
           .setColor(0x22c55e)
           .setTitle("Coupon Redeemed")
           .setDescription(
-            `You received ${formatCoins(result.amount)}.\nNew balance: ${formatCoins(result.newBalance)}`,
+            `You received ${formatCoins(result.amount)}.\nNew balance: ${formatCoins(result.newBalance)}\n\n` +
+            `⚠️ **Wagering requirement:** You must wager **${formatCoins(result.amount)}** before you can withdraw.\n` +
+            `Play any game — every bet chips away at it.`,
           )
           .setFooter({ text: `Code: ${code}` }),
       ],
