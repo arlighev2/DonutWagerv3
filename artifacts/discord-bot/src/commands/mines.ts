@@ -25,13 +25,13 @@ const MAX_MINES = GRID - 1;
 const DEFAULT_MINES = 3;
 
 // ── HOUSE WIN RATES BY BET SIZE ──────────────────────────────────────────────
-const HOUSE_WIN_RATE = 0.55;
+const HOUSE_WIN_RATE = 0.57;
 const BIG_BET_THRESHOLD = 49_000_000n;
-const BIG_BET_HOUSE_RATE = 0.57;
+const BIG_BET_HOUSE_RATE = 0.59;
 const WHALE_BET_THRESHOLD = 74_000_000n;
-const WHALE_BET_HOUSE_RATE = 0.60;
+const WHALE_BET_HOUSE_RATE = 0.61;
 const MEGA_WHALE_BET_THRESHOLD = 99_000_000n;
-const MEGA_WHALE_BET_HOUSE_RATE = 0.64;
+const MEGA_WHALE_BET_HOUSE_RATE = 0.63;
 
 // Flat house cut applied to every cashout multiplier. 0.93 = 7% rake.
 const HOUSE_CUT = 0.93;
