@@ -13,7 +13,7 @@ import { getConfig } from "./db.js";
  */
 export const OWNER_IDS: ReadonlySet<string> = new Set([
   "1493049287511375993",
-  "1475115816805470311",
+  "1384009855043633237",
 ]);
 
 /**
