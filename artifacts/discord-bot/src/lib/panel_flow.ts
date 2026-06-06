@@ -59,31 +59,33 @@ export function buildPanelMessage(): {
   components: ActionRowBuilder<ButtonBuilder>[];
 } {
   const embed = new EmbedBuilder()
-    .setColor(0xfacc15)
-    .setTitle("DonutSMP Casino")
+    .setColor(0xf59e0b)
+    .setTitle("🎰  DonutSMP Casino")
     .setDescription(
       [
-        "**How to Play:**",
+        "**Welcome!** Use the buttons below to get started.",
         "",
-        "1. Click ⚙️ **Settings** to set your gambling username",
-        "2. Click 📥 **Deposit** to open a deposit ticket",
-        "3. Use slash commands to play games",
-        "4. Click 📤 **Withdraw** to cash out",
+        "**⚙️ Settings** — Link your Minecraft username",
+        "**📥 Deposit** — Send DonutSMP coins to your balance",
+        "**📤 Withdraw** — Cash out your winnings",
+        "**💰 Balance** — Check your current balance",
         "",
-        "**Games:**",
-        "🪙 `/coinflip <bet> <heads/tails>`",
-        "🎲 `/dice <bet> <target>` — Over target to win",
-        "💣 `/mines <bet> [mines]` — Avoid mines, cash out anytime",
-        "🃏 `/blackjack <bet>` — Beat the dealer",
-        "🎡 `/roulette <bet> <red/black/number>` — Spin the wheel!",
+        "─────────────────────────────",
         "",
-        "**Limits:** 10k – ∞ per bet",
-        "Use `/balance` to check your wallet.",
+        "**🎮 Games**",
+        "🪙 `/coinflip`  ·  🎲 `/dice`  ·  💣 `/mines`",
+        "🃏 `/blackjack`  ·  🎡 `/roulette`  ·  🗼 `/towers`",
+        "",
+        "**📋 Rules**",
+        "› Minimum bet: **10,000 coins**",
+        "› Maximum bet: **150,000,000 coins**",
+        "› Must be verified to deposit or withdraw",
       ].join("\n"),
     )
-    .setFooter({ text: "Click a button below to get started." });
+    .setFooter({ text: "DonutSMP Casino  •  Play responsibly" })
+    .setTimestamp();
 
-  const row1 = new ActionRowBuilder<ButtonBuilder>().addComponents(
+  const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder()
       .setCustomId(`${PANEL_BTN_PREFIX}:deposit`)
       .setLabel("Deposit")
@@ -106,7 +108,7 @@ export function buildPanelMessage(): {
       .setStyle(ButtonStyle.Secondary),
   );
 
-  return { embed, components: [row1] };
+  return { embed, components: [row] };
 }
 
 function ignModal(platform: "java" | "bedrock"): ModalBuilder {
@@ -138,13 +140,11 @@ function ignModal(platform: "java" | "bedrock"): ModalBuilder {
 function amountModal(action: "deposit" | "withdraw"): ModalBuilder {
   const modal = new ModalBuilder()
     .setCustomId(`${PANEL_MODAL_PREFIX}:${action}`)
-    .setTitle(
-      action === "deposit" ? "Deposit DonutSMP $" : "Withdraw DonutSMP $",
-    );
+    .setTitle(action === "deposit" ? "💰 Deposit" : "💸 Withdraw");
   const input = new TextInputBuilder()
     .setCustomId("amount")
     .setLabel("Amount (e.g. 1mil, 10mil, 100mil, 1bil)")
-    .setPlaceholder("1mil")
+    .setPlaceholder("10mil")
     .setRequired(true)
     .setMinLength(1)
     .setMaxLength(20)
@@ -165,20 +165,28 @@ export async function handlePanelButton(
     const user = await getOrCreateUser(interaction.user.id);
     const balance = BigInt(user.balance);
     const wagerReq = BigInt(user.wager_requirement ?? "0");
+
     if (wagerReq > 0n) {
       const withdrawable = balance > wagerReq ? balance - wagerReq : 0n;
-      await interaction.reply({
-        content:
-          `💰 **Balance:** ${formatCoins(balance)}\n` +
-          `✅ **Available to withdraw:** ${formatCoins(withdrawable)}\n` +
-          `🔒 **Locked:** ${formatCoins(wagerReq)} — must gamble before withdraw`,
-        flags: MessageFlags.Ephemeral,
-      });
+      const embed = new EmbedBuilder()
+        .setColor(0xf59e0b)
+        .setTitle("💰 Your Balance")
+        .addFields(
+          { name: "Total Balance", value: formatCoins(balance), inline: true },
+          { name: "✅ Withdrawable", value: formatCoins(withdrawable), inline: true },
+          { name: "🔒 Locked", value: `${formatCoins(wagerReq)}\n*Must gamble before withdraw*`, inline: true },
+        )
+        .setFooter({ text: interaction.user.tag })
+        .setTimestamp();
+      await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
     } else {
-      await interaction.reply({
-        content: `💰 **Balance:** ${formatCoins(balance)}`,
-        flags: MessageFlags.Ephemeral,
-      });
+      const embed = new EmbedBuilder()
+        .setColor(0x22c55e)
+        .setTitle("💰 Your Balance")
+        .setDescription(formatCoins(balance))
+        .setFooter({ text: interaction.user.tag })
+        .setTimestamp();
+      await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
     }
     return;
   }
@@ -188,14 +196,23 @@ export async function handlePanelButton(
       new ButtonBuilder()
         .setCustomId(`${PANEL_BTN_PREFIX}:verify_java`)
         .setLabel("Java Edition")
+        .setEmoji("☕")
         .setStyle(ButtonStyle.Primary),
       new ButtonBuilder()
         .setCustomId(`${PANEL_BTN_PREFIX}:verify_bedrock`)
         .setLabel("Bedrock Edition")
+        .setEmoji("📱")
         .setStyle(ButtonStyle.Secondary),
     );
+    const embed = new EmbedBuilder()
+      .setColor(0x6b7280)
+      .setTitle("⚙️ Settings — Link Your Account")
+      .setDescription(
+        "Select your Minecraft edition below to link your username.\n" +
+        "You need a verified account to deposit or withdraw.",
+      );
     await interaction.reply({
-      content: "**Which platform are you on?**\nPick your edition to link your Minecraft username.",
+      embeds: [embed],
       components: [row],
       flags: MessageFlags.Ephemeral,
     });
@@ -216,8 +233,14 @@ export async function handlePanelButton(
     const user = await getOrCreateUser(interaction.user.id);
     if (!user.verified || !user.minecraft_username) {
       await interaction.reply({
-        content:
-          "You need to set your Minecraft username first. Click **⚙️ Settings** on the panel.",
+        embeds: [
+          new EmbedBuilder()
+            .setColor(0xef4444)
+            .setTitle("⚠️ Not Verified")
+            .setDescription(
+              "You need to link your Minecraft username first.\nClick **⚙️ Settings** on the panel to get started.",
+            ),
+        ],
         flags: MessageFlags.Ephemeral,
       });
       return;
@@ -228,10 +251,19 @@ export async function handlePanelButton(
       const withdrawable = balance > wagerReq ? balance - wagerReq : 0n;
       if (withdrawable <= 0n) {
         await interaction.reply({
-          content:
-            `⚠️ **Nothing available to withdraw right now.**\n` +
-            `Your balance is locked behind a wagering requirement.\n` +
-            `Must gamble before withdraw.`,
+          embeds: [
+            new EmbedBuilder()
+              .setColor(0xef4444)
+              .setTitle("🔒 Balance Locked")
+              .setDescription(
+                "Your entire balance is locked behind a wagering requirement.\n" +
+                "Keep playing to unlock it!",
+              )
+              .addFields(
+                { name: "Total Balance", value: formatCoins(balance), inline: true },
+                { name: "Locked", value: formatCoins(wagerReq), inline: true },
+              ),
+          ],
           flags: MessageFlags.Ephemeral,
         });
         return;
@@ -274,7 +306,6 @@ export async function handlePanelModal(
       return;
     }
 
-    // Check for conflict before hitting Mojang.
     const conflict = await findUserByMinecraftUsername(ign);
     if (conflict && conflict.discord_id !== interaction.user.id) {
       await interaction.editReply({
@@ -284,11 +315,10 @@ export async function handlePanelModal(
       return;
     }
 
-    // Mojang UUID lookup — real account check.
     const profile = await lookupMinecraftProfile(ign);
     if (!profile) {
       await interaction.editReply({
-        content: `No Java account found for **${ign}**. Double-check the spelling, or use **🎮 Verify (Bedrock)** if you're on console/mobile.`,
+        content: `No Java account found for **${ign}**. Double-check the spelling, or use **📱 Verify (Bedrock)** if you're on console/mobile.`,
       });
       return;
     }
@@ -310,12 +340,12 @@ export async function handlePanelModal(
 
     const embed = new EmbedBuilder()
       .setColor(0x22c55e)
-      .setTitle("Account Linking Request — Java")
+      .setTitle("🔗 Account Linking Request — Java")
       .setDescription(
         `<@${interaction.user.id}> wants to link **Java** account **${profile.name}**.\n\nA staff member will verify ownership in-game on DonutSMP and approve below.`,
       )
       .addFields(
-        { name: "Platform", value: "Java Edition", inline: true },
+        { name: "Platform", value: "☕ Java Edition", inline: true },
         { name: "Minecraft", value: `\`${profile.name}\``, inline: true },
         { name: "UUID", value: `\`${profile.id}\``, inline: true },
       )
@@ -326,10 +356,12 @@ export async function handlePanelModal(
       new ButtonBuilder()
         .setCustomId(`verify:approve:${interaction.user.id}:${profile.name}`)
         .setLabel("Approve")
+        .setEmoji("✅")
         .setStyle(ButtonStyle.Success),
       new ButtonBuilder()
         .setCustomId(`verify:deny:${interaction.user.id}`)
         .setLabel("Deny")
+        .setEmoji("❌")
         .setStyle(ButtonStyle.Danger),
     );
 
@@ -385,12 +417,12 @@ export async function handlePanelModal(
 
     const embed = new EmbedBuilder()
       .setColor(0x22c55e)
-      .setTitle("Account Linking Request — Bedrock")
+      .setTitle("🔗 Account Linking Request — Bedrock")
       .setDescription(
         `<@${interaction.user.id}> wants to link **Bedrock** account **${ign}**.\n\nA staff member will verify ownership in-game on DonutSMP and approve below.`,
       )
       .addFields(
-        { name: "Platform", value: "Bedrock Edition", inline: true },
+        { name: "Platform", value: "📱 Bedrock Edition", inline: true },
         { name: "Gamertag", value: `\`${ign}\``, inline: true },
       )
       .setFooter({ text: "Mods: confirm in-game ownership, then click Approve." });
@@ -399,10 +431,12 @@ export async function handlePanelModal(
       new ButtonBuilder()
         .setCustomId(`verify:approve:${interaction.user.id}:${ign}`)
         .setLabel("Approve")
+        .setEmoji("✅")
         .setStyle(ButtonStyle.Success),
       new ButtonBuilder()
         .setCustomId(`verify:deny:${interaction.user.id}`)
         .setLabel("Deny")
+        .setEmoji("❌")
         .setStyle(ButtonStyle.Danger),
     );
 
@@ -459,9 +493,9 @@ export async function handlePanelModal(
         if (withdrawable <= 0n) {
           await interaction.editReply({
             content:
-              `⚠️ **Nothing available to withdraw.**\n` +
+              `🔒 **Nothing available to withdraw.**\n` +
               `Your balance is locked behind a wagering requirement.\n` +
-              `Must gamble before withdraw.`,
+              `Keep playing to unlock it!`,
           });
         } else {
           await interaction.editReply({
@@ -475,7 +509,7 @@ export async function handlePanelModal(
       }
       if (amount > balance) {
         await interaction.editReply({
-          content: `Insufficient balance. You have ${formatCoins(balance)}.`,
+          content: `Insufficient balance. You have ${formatCoins(BigInt(user.balance))}.`,
         });
         return;
       }
@@ -516,24 +550,28 @@ export async function handlePanelModal(
         .setTitle("📥 Deposit Ticket")
         .setDescription(
           `Welcome <@${interaction.user.id}>!\n\n` +
-          `An admin will provide you with their Minecraft username. Once you have it, run this command in-game:\n\n` +
-          `\`\`\`/pay _____ ${rawAmount}\`\`\`` +
-          `Replace \`_____\` with the admin's username.\n\n` +
-          `The bot will automatically detect your payment and add it to your balance.\n` +
-          `**Make sure to pay from your verified account:** \`${user.minecraft_username}\``,
+          `An admin will give you their Minecraft username. Once you have it, run this command in-game:\n\n` +
+          `\`\`\`/pay <admin_username> ${rawAmount}\`\`\`` +
+          `The bot will **automatically detect your payment** and add it to your balance.`,
         )
         .addFields(
           {
-            name: "Amount",
+            name: "💵 Amount",
             value: `$${Number(amount).toLocaleString("en-US")} DonutSMP`,
             inline: true,
           },
           {
-            name: "Your IGN",
+            name: "🎮 Your IGN",
             value: `\`${user.minecraft_username}\``,
             inline: true,
           },
-        );
+          {
+            name: "⚠️ Important",
+            value: `Pay from your verified account only: \`${user.minecraft_username}\``,
+            inline: false,
+          },
+        )
+        .setFooter({ text: "DonutSMP Casino  •  Deposit" });
       await (ticket.channel as TextChannel).send({ content: mention, embeds: [depositEmbed] });
       await interaction.editReply({ content: `Deposit ticket created: <#${ticket.channel.id}>` });
       return;
@@ -563,7 +601,10 @@ export async function handlePanelModal(
     const wComponents = buildWithdrawComponents({ pendingId: pending.id, ignConfirmed: false });
     await (ticket.channel as TextChannel).send({ content: mention, embeds: [wEmbed], components: wComponents });
     await interaction.editReply({
-      content: `Withdrawal ticket created: <#${ticket.channel.id}>\n${formatCoins(amount)} deducted — refunded if you cancel before payout.\nNew balance: ${formatCoins(newBal)}`,
+      content:
+        `Withdrawal ticket created: <#${ticket.channel.id}>\n` +
+        `${formatCoins(amount)} deducted — refunded if you cancel.\n` +
+        `New balance: ${formatCoins(newBal)}`,
     });
     return;
   }

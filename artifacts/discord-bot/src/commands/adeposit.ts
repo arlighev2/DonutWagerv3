@@ -8,7 +8,8 @@ import { adjustBalance, getOrCreateUser, recordBalanceEvent } from "../lib/db.js
 import { formatCoins, parseAmount } from "../lib/format.js";
 import { isOwner } from "../lib/permissions.js";
 import type { SlashCommand } from "../lib/types.js";
-const DEPOSIT_LOG_CHANNEL_ID = "1498440931026927817";
+import { CHANNELS } from "../lib/config.js";
+
 const command: SlashCommand = {
   data: new SlashCommandBuilder()
     .setName("adeposit")
@@ -25,10 +26,7 @@ const command: SlashCommand = {
     ),
   async execute(interaction: ChatInputCommandInteraction): Promise<void> {
     if (!isOwner(interaction)) {
-      await interaction.reply({
-        content: "Bot owner only.",
-        ephemeral: true,
-      });
+      await interaction.reply({ content: "Bot owner only.", ephemeral: true });
       return;
     }
     const target = interaction.options.getUser("user", true);
@@ -57,21 +55,19 @@ const command: SlashCommand = {
         { name: "Amount", value: formatCoins(amount), inline: true },
         { name: "New Balance", value: formatCoins(newBal), inline: true },
         { name: "By", value: `<@${interaction.user.id}>`, inline: true },
-        { name: "Note", value: "deposit", inline: true },
       )
       .setTimestamp()
       .setFooter({ text: `Deposited by ${interaction.user.tag}` });
     await interaction.reply({ embeds: [embed], ephemeral: true });
     try {
-      const logChannel = await interaction.client.channels.fetch(
-        DEPOSIT_LOG_CHANNEL_ID,
-      );
+      const logChannel = await interaction.client.channels.fetch(CHANNELS.WITHDRAW_LOG);
       if (logChannel?.isTextBased() && "send" in logChannel) {
         await (logChannel as { send: (opts: unknown) => Promise<unknown> }).send({ embeds: [embed] });
       }
     } catch {
-      // Channel unreachable — deposit still went through.
+      /* ignore */
     }
   },
 };
+
 export default command;

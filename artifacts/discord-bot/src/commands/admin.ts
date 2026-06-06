@@ -28,6 +28,7 @@ import {
   VOUCH_CHANNEL_ID,
   WITHDRAW_LOG_CHANNEL_ID,
 } from "../lib/constants.js";
+import { DEPOSIT_LOG_CHANNEL_IDS } from "../lib/config.js";
 import {
   logAdminAction,
   logWithdraw,
@@ -36,8 +37,6 @@ import {
 import { CATEGORY_CONFIG_KEYS } from "../lib/tickets.js";
 import { buildPanelMessage } from "../lib/panel_flow.js";
 import { getInviteStats, getInviteList, getNextClaimMin, COINS_PER_INVITE } from "../lib/invite_flow.js";
-
-const DEPOSIT_LOG_CHANNEL_IDS = ["1498419875021066240", "1498440931026927817"];
 
 const SUBS_OWNER_ONLY = new Set([
   "approve",

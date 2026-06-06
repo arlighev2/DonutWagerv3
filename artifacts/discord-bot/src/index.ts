@@ -44,15 +44,17 @@ import {
   PAYMENT_CHANNEL_ID,
   handlePaymentMessage,
 } from "./lib/payment_flow.js";
+import { CHANNELS } from "./lib/config.js";
 
-// One-time auto-post target for the casino panel embed.
-const DEFAULT_PANEL_CHANNEL_ID = "1498881450643296400";
+// DB keys for remembering where the panel is posted.
 const PANEL_CHANNEL_KEY = "panel_channel_id";
 const PANEL_MESSAGE_KEY = "panel_message_id";
 
+// Cache the ready client so the MessageDelete handler can reference it.
+let readyClient: Client<true> | null = null;
+
 async function ensurePanelPosted(client: Client<true>): Promise<void> {
-  const channelId =
-    (await getConfig(PANEL_CHANNEL_KEY)) ?? DEFAULT_PANEL_CHANNEL_ID;
+  const channelId = (await getConfig(PANEL_CHANNEL_KEY)) ?? CHANNELS.PANEL;
   const channel = await client.channels.fetch(channelId).catch(() => null);
   if (!channel || !channel.isTextBased() || !("send" in channel)) {
     console.warn(
@@ -63,8 +65,10 @@ async function ensurePanelPosted(client: Client<true>): Promise<void> {
 
   const existingId = await getConfig(PANEL_MESSAGE_KEY);
   if (existingId) {
-    const existing = await (channel as { messages: { fetch: (id: string) => Promise<unknown> } })
-      .messages.fetch(existingId)
+    const existing = await (
+      channel as { messages: { fetch: (id: string) => Promise<unknown> } }
+    ).messages
+      .fetch(existingId)
       .catch(() => null);
     if (existing) {
       console.log(`[bot] Casino panel already posted at message ${existingId}.`);
@@ -73,12 +77,15 @@ async function ensurePanelPosted(client: Client<true>): Promise<void> {
   }
 
   const { embed, components } = buildPanelMessage();
-  const sent = await (channel as { send: (opts: unknown) => Promise<{ id: string }> })
+  const sent = await (
+    channel as { send: (opts: unknown) => Promise<{ id: string }> }
+  )
     .send({ embeds: [embed], components })
     .catch((err) => {
       console.error("[bot] Failed to post casino panel:", err);
       return null;
     });
+
   if (sent) {
     await setConfig(PANEL_CHANNEL_KEY, channelId);
     await setConfig(PANEL_MESSAGE_KEY, sent.id);
@@ -98,8 +105,6 @@ if (!TOKEN || !CLIENT_ID) {
   process.exit(1);
 }
 
-// Bumped key (was `registered_commands_hash`) so we force-register once after
-// switching from global → guild-scoped commands.
 const COMMAND_HASH_KEY = "registered_guild_commands_hash";
 
 async function registerGuildCommands(client: Client<true>): Promise<void> {
@@ -147,9 +152,7 @@ async function registerGuildCommands(client: Client<true>): Promise<void> {
   }
 }
 
-async function memberIsMod(
-  interaction: ButtonInteraction,
-): Promise<boolean> {
+async function memberIsMod(interaction: ButtonInteraction): Promise<boolean> {
   return isMod(interaction);
 }
 
@@ -157,7 +160,6 @@ async function handleVerifyButton(
   interaction: ButtonInteraction,
 ): Promise<void> {
   const parts = interaction.customId.split(":");
-  // verify:approve:<discordId>:<minecraftName>  or  verify:deny:<discordId>
   const action = parts[1];
   const targetId = parts[2];
   const mcName = parts[3];
@@ -179,7 +181,6 @@ async function handleVerifyButton(
       });
       return;
     }
-    // Defensive: another user may have linked this MC name in the meantime.
     const conflict = await findUserByMinecraftUsername(mcName);
     if (conflict && conflict.discord_id !== targetId) {
       await interaction.reply({
@@ -195,9 +196,7 @@ async function handleVerifyButton(
         EmbedBuilder.from(interaction.message.embeds[0]!)
           .setColor(0x22c55e)
           .setTitle("✅ Verification Approved")
-          .setFooter({
-            text: `Approved by ${interaction.user.tag}`,
-          }),
+          .setFooter({ text: `Approved by ${interaction.user.tag}` }),
       ],
       components: [],
     });
@@ -205,14 +204,13 @@ async function handleVerifyButton(
     try {
       if (channel && "send" in channel) {
         await channel.send(
-          `<@${targetId}> you've been verified. Use \`/balance\`, claim \`/daily\`. This ticket will close automatically in 10 seconds.`,
+          `<@${targetId}> you've been verified! Use \`/balance\` and claim your \`/daily\`. This ticket closes in 10 seconds.`,
         );
       }
     } catch {
       /* ignore */
     }
 
-    // Auto-close the ticket 10 seconds after approval.
     if (
       channel &&
       "delete" in channel &&
@@ -226,7 +224,7 @@ async function handleVerifyButton(
           try {
             await ticketChannel.delete("Verification approved — auto-close");
           } catch {
-            /* channel already deleted or no perms */
+            /* already deleted or no perms */
           }
         })();
       }, 10_000);
@@ -245,7 +243,7 @@ async function handleVerifyButton(
       const channel = interaction.channel;
       if (channel && "send" in channel) {
         await channel.send(
-          `<@${targetId}> your verification was denied. Please re-check your Minecraft username and try \`/verify\` again, or contact a moderator for help.`,
+          `<@${targetId}> your verification was denied. Please re-check your Minecraft username and try again, or contact a moderator.`,
         );
       }
     } catch {
@@ -269,10 +267,9 @@ async function main(): Promise<void> {
   setLogClient(client);
 
   client.once(Events.ClientReady, (c) => {
+    readyClient = c;
     console.log(`[bot] Logged in as ${c.user.tag}`);
-    // Register commands per-guild (instant, separate rate-limit pool from
-    // global commands which are slow + heavily throttled). Runs in the
-    // background so a slow Discord call doesn't break interaction handling.
+
     void registerGuildCommands(c).catch((err) => {
       console.error("[bot] Guild command registration failed:", err);
     });
@@ -282,6 +279,24 @@ async function main(): Promise<void> {
     void initInviteCache(c).catch((err) => {
       console.error("[bot] Invite cache init failed:", err);
     });
+  });
+
+  // ── Auto-repost panel if its message is deleted ───────────────────────────
+  client.on(Events.MessageDelete, (message) => {
+    void (async () => {
+      try {
+        const storedId = await getConfig(PANEL_MESSAGE_KEY);
+        if (!storedId || message.id !== storedId) return;
+        console.log("[bot] Panel message was deleted — re-posting…");
+        // Clear stored ID so ensurePanelPosted will post a fresh one.
+        await setConfig(PANEL_MESSAGE_KEY, "");
+        if (readyClient) {
+          await ensurePanelPosted(readyClient);
+        }
+      } catch {
+        /* ignore */
+      }
+    })();
   });
 
   client.on(Events.GuildMemberAdd, (member) => {
@@ -313,7 +328,6 @@ async function main(): Promise<void> {
     });
   });
 
-  // Auto-register when the bot is added to a new guild later.
   client.on(Events.GuildCreate, (guild) => {
     console.log(`[bot] Joined new guild ${guild.name} (${guild.id}) — registering commands.`);
     if (client.isReady()) {
@@ -348,8 +362,6 @@ async function main(): Promise<void> {
           await handleInviteButton(interaction);
           return;
         }
-        // Other button collectors (mines, blackjack, towers) are handled in
-        // their own per-message createMessageComponentCollector.
         return;
       }
       if (interaction.isModalSubmit()) {
@@ -362,10 +374,7 @@ async function main(): Promise<void> {
     } catch (err) {
       console.error("[bot] Interaction failed:", err);
       if (!interaction.isRepliable()) return;
-      const reply = {
-        content: "Something went wrong handling that.",
-        ephemeral: true,
-      };
+      const reply = { content: "Something went wrong handling that.", ephemeral: true };
       try {
         if (interaction.deferred || interaction.replied) {
           await interaction.followUp(reply);
