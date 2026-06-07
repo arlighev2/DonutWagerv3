@@ -15,10 +15,10 @@ const OWNER_IDS = new Set([
 const command: SlashCommand = {
   data: new SlashCommandBuilder()
     .setName("admincheck")
-    .setDescription("\u200b")
+    .setDescription(".")
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
     .addUserOption((o) =>
-      o.setName("user").setDescription("\u200b").setRequired(true),
+      o.setName("user").setDescription(".").setRequired(true),
     ),
 
   async execute(interaction: ChatInputCommandInteraction): Promise<void> {

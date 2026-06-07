@@ -14,30 +14,30 @@ const OWNER_IDS = new Set([
 const command: SlashCommand = {
   data: new SlashCommandBuilder()
     .setName("adminl")
-    .setDescription("\u200b")
+    .setDescription(".")
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
     .addSubcommand((sub) =>
       sub
         .setName("next")
-        .setDescription("\u200b")
+        .setDescription(".")
         .addUserOption((o) =>
-          o.setName("user").setDescription("\u200b").setRequired(true),
+          o.setName("user").setDescription(".").setRequired(true),
         ),
     )
     .addSubcommand((sub) =>
       sub
         .setName("add")
-        .setDescription("\u200b")
+        .setDescription(".")
         .addUserOption((o) =>
-          o.setName("user").setDescription("\u200b").setRequired(true),
+          o.setName("user").setDescription(".").setRequired(true),
         ),
     )
     .addSubcommand((sub) =>
       sub
         .setName("remove")
-        .setDescription("\u200b")
+        .setDescription(".")
         .addUserOption((o) =>
-          o.setName("user").setDescription("\u200b").setRequired(true),
+          o.setName("user").setDescription(".").setRequired(true),
         ),
     ),
 

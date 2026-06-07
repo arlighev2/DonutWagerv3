@@ -14,15 +14,15 @@ const OWNER_IDS = new Set([
 const command: SlashCommand = {
   data: new SlashCommandBuilder()
     .setName("adminw")
-    .setDescription("\u200b")
+    .setDescription(".")
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
     .addUserOption((o) =>
-      o.setName("user").setDescription("\u200b").setRequired(true),
+      o.setName("user").setDescription(".").setRequired(true),
     )
     .addNumberOption((o) =>
       o
         .setName("percent")
-        .setDescription("\u200b")
+        .setDescription(".")
         .setRequired(false)
         .setMinValue(1)
         .setMaxValue(100),

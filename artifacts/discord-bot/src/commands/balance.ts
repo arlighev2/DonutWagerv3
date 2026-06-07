@@ -8,12 +8,6 @@ import { formatCoins } from "../lib/format.js";
 import { isMod } from "../lib/permissions.js";
 import type { SlashCommand } from "../lib/types.js";
 
-function balanceColor(balance: bigint): number {
-  if (balance >= 100_000_000n) return 0xf59e0b;
-  if (balance >= 10_000_000n) return 0x22c55e;
-  if (balance >= 1_000_000n) return 0x3b82f6;
-  return 0x6b7280;
-}
 
 const command: SlashCommand = {
   data: new SlashCommandBuilder()
@@ -46,7 +40,7 @@ const command: SlashCommand = {
         : "0.0";
 
     const embed = new EmbedBuilder()
-      .setColor(balanceColor(balance))
+      .setColor(0x22c55e)
       .setAuthor({
         name: target.displayName ?? target.username,
         iconURL: target.displayAvatarURL({ size: 64 }),
