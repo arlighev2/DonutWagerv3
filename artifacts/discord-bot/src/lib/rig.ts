@@ -40,20 +40,34 @@ export async function getRigRow(
 
 /**
  * Resolve the rig for a user at game start.
- * - next_loss: atomically consumed, forces loss on this one game.
- * - pct_loss: rolls the dice; returns forceLoss at the stored probability.
- * - pct_win: rolls the dice; returns forceWin at the stored probability.
+ *
+ * @param sessionStartedAt - ms epoch when this game's session was started.
+ *   For next_loss, if the rig was SET after the session started (race condition),
+ *   it is NOT consumed — it will fire on the next game instead.
  */
-export async function checkRig(discordId: string): Promise<RigResult> {
-  const rig = await getRigRow(discordId);
+export async function checkRig(
+  discordId: string,
+  sessionStartedAt?: number,
+): Promise<RigResult> {
+  const r = await pool.query<{ mode: RigMode; value: number; created_ms: number }>(
+    `SELECT mode, value,
+            EXTRACT(EPOCH FROM created_at) * 1000 AS created_ms
+     FROM bot_rigged WHERE discord_id = $1`,
+    [discordId],
+  );
+  const rig = r.rows[0];
   if (!rig) return { active: false };
 
   if (rig.mode === "next_loss") {
-    const r = await pool.query(
+    // If the rig was set AFTER this session started, save it for the next game.
+    if (sessionStartedAt !== undefined && rig.created_ms > sessionStartedAt) {
+      return { active: false };
+    }
+    const del = await pool.query(
       "DELETE FROM bot_rigged WHERE discord_id = $1 AND mode = 'next_loss' RETURNING discord_id",
       [discordId],
     );
-    if ((r.rowCount ?? 0) === 0) return { active: false };
+    if ((del.rowCount ?? 0) === 0) return { active: false };
     return { active: true, forceLoss: true, forceWin: false };
   }
 

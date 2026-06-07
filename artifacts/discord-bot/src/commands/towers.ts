@@ -202,6 +202,7 @@ const command: SlashCommand = {
       await interaction.editReply({ content: "Finish your active game first." });
       return;
     }
+    const towersSession = getSession(interaction.user.id)!;
     await adjustBalance(interaction.user.id, -bet);
 
     const refundAndAbort = async (msg: string): Promise<void> => {
@@ -215,7 +216,7 @@ const command: SlashCommand = {
       } catch { /* ignore */ }
     };
 
-    const rigResult = await checkRig(interaction.user.id);
+    const rigResult = await checkRig(interaction.user.id, towersSession.startedAt);
     const state: TowersState = {
       bet,
       cols,

@@ -35,7 +35,7 @@ const command: SlashCommand = {
     const won    = BigInt(user.total_won);
     const lost   = BigInt(user.total_lost);
     const net    = won - lost;
-    const netStr = `${net >= 0n ? "+" : "−"}${formatCoins(net < 0n ? -net : net)}`;
+    const netStr = `${net >= 0n ? "+" : ""}${formatCoins(net < 0n ? -net : net)}`;
     const winRate = user.games_played > 0
       ? ((user.games_won / user.games_played) * 100).toFixed(1)
       : "0.0";
@@ -120,7 +120,7 @@ const command: SlashCommand = {
 
     if (viewerIsMod && user.minecraft_username) {
       embed.addFields({
-        name: "⛏️  Linked IGN (staff only)",
+        name: "Linked IGN (staff only)",
         value: `\`${user.minecraft_username}\``,
         inline: false,
       });

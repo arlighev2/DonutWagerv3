@@ -161,16 +161,16 @@ function buildContainer(
     bodyLines = [
       `**Tiles revealed:** ${state.revealed.size}`,
       `**Multiplier:** x${summary.multiplier.toFixed(2)}`,
-      `**Gross:** ${formatSigned(summary.netDelta)} 🪙`,
-      `**New Balance:** ${formatCoins(summary.newBalance)} 🪙`,
+      `**Gross:** ${formatSigned(summary.netDelta)} `,
+      `**New Balance:** ${formatCoins(summary.newBalance)} `,
     ];
   } else if (state.exploded && summary) {
     header = "## 💥 BOOM — Mine Hit!";
     bodyLines = [
       `**Tiles revealed:** ${state.revealed.size}`,
       `**Multiplier:** x0.00`,
-      `**Gross:** ${formatSigned(summary.netDelta)} 🪙`,
-      `**New Balance:** ${formatCoins(summary.newBalance)} 🪙`,
+      `**Gross:** ${formatSigned(summary.netDelta)} `,
+      `**New Balance:** ${formatCoins(summary.newBalance)} `,
     ];
   } else if (state.timedOut) {
     header = "## ⌛ Timed Out";
@@ -275,6 +275,7 @@ const command: SlashCommand = {
       await interaction.editReply({ content: "Finish your active game first." });
       return;
     }
+    const minesSession = getSession(interaction.user.id)!;
     await adjustBalance(interaction.user.id, -bet);
 
     const refundAndAbort = async (msg: string): Promise<void> => {
@@ -295,7 +296,7 @@ const command: SlashCommand = {
 
     const winRate = houseWinRateForBet(bet);
     const baseWillHouseWin = Math.random() < winRate;
-    const rigResult = await checkRig(interaction.user.id);
+    const rigResult = await checkRig(interaction.user.id, minesSession.startedAt);
     const willHouseWin = rigResult.active && rigResult.forceLoss
       ? true
       : rigResult.active && rigResult.forceWin

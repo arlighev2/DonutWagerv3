@@ -23,12 +23,14 @@ import uptime from "./uptime.js";
 import l from "./l.js";
 import w from "./w.js";
 import admincheck from "./admincheck.js";
+import adminremove from "./adminremove.js";
 
 export const commands: SlashCommand[] = [
   uptime,
   l,
   w,
   admincheck,
+  adminremove,
   invites,
   invited,
   balance,

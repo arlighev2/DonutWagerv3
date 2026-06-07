@@ -222,11 +222,12 @@ const command: SlashCommand = {
       await interaction.editReply({ content: "Finish your active game first." });
       return;
     }
+    const bjSession = getSession(interaction.user.id)!;
     await adjustBalance(interaction.user.id, -bet);
 
     // ── Deal ────────────────────────────────────────────────────────────────
     const deck = buildDeck();
-    const rigResult = await checkRig(interaction.user.id);
+    const rigResult = await checkRig(interaction.user.id, bjSession.startedAt);
     const state: BJState = {
       bet,
       deck,
@@ -238,9 +239,7 @@ const command: SlashCommand = {
         : rigResult.active && rigResult.forceWin
           ? false
           : Math.random() < houseRate(bet),
-      rig: rigResult.active
-        ? (rigResult.forceLoss ? 1.0 : 0.0)
-        : riggingBias(bet),
+      rig: rigResult.active ? 1.0 : riggingBias(bet),
     };
     state.player.push(drawBiased(state, true));
     state.dealer.push(drawBiased(state, false));
