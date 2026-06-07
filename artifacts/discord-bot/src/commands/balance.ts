@@ -68,27 +68,27 @@ const command: SlashCommand = {
           inline: true,
         },
         {
-          name: "🏆  Total Won",
+          name: "Total Won",
           value: `\`\`\`${formatCoins(won)}\`\`\``,
           inline: true,
         },
         {
-          name: "💸  Total Lost",
+          name: "Total Lost",
           value: `\`\`\`${formatCoins(lost)}\`\`\``,
           inline: true,
         },
         {
-          name: "📈  Win Rate",
+          name: "Win Rate",
           value: `\`\`\`${winRate}%\`\`\``,
           inline: true,
         },
         {
-          name: "🎮  Games Played",
+          name: "Games Played",
           value: `\`\`\`${user.games_played.toLocaleString()}\`\`\``,
           inline: true,
         },
         {
-          name: "🥇  Games Won",
+          name: "Games Won",
           value: `\`\`\`${user.games_won.toLocaleString()}\`\`\``,
           inline: true,
         },
