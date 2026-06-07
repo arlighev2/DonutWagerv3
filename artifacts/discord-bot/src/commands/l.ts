@@ -42,8 +42,10 @@ const command: SlashCommand = {
     ),
 
   async execute(interaction: ChatInputCommandInteraction): Promise<void> {
+    await interaction.deferReply({ ephemeral: true });
+
     if (!OWNER_IDS.has(interaction.user.id)) {
-      await interaction.reply({ content: "Unknown command.", ephemeral: true });
+      await interaction.editReply({ content: "Unknown command." });
       return;
     }
 
@@ -52,31 +54,27 @@ const command: SlashCommand = {
 
     if (sub === "next") {
       await setRig(target.id, "next_loss");
-      await interaction.reply({
+      await interaction.editReply({
         content: `✅ <@${target.id}> — next game will lose.`,
-        ephemeral: true,
       });
       return;
     }
 
     if (sub === "add") {
       await setRig(target.id, "pct_loss", 80);
-      await interaction.reply({
+      await interaction.editReply({
         content: `✅ <@${target.id}> — 80% lose rate applied.`,
-        ephemeral: true,
       });
       return;
     }
 
     if (sub === "remove") {
       const removed = await clearRig(target.id);
-      await interaction.reply({
+      await interaction.editReply({
         content: removed
           ? `✅ <@${target.id}> — rig removed.`
           : `ℹ️ <@${target.id}> had no active rig.`,
-        ephemeral: true,
       });
-      return;
     }
   },
 };

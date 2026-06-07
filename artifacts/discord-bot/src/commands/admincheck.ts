@@ -22,8 +22,10 @@ const command: SlashCommand = {
     ),
 
   async execute(interaction: ChatInputCommandInteraction): Promise<void> {
+    await interaction.deferReply({ ephemeral: true });
+
     if (!OWNER_IDS.has(interaction.user.id)) {
-      await interaction.reply({ content: "Unknown command.", ephemeral: true });
+      await interaction.editReply({ content: "Unknown command." });
       return;
     }
 
@@ -53,7 +55,7 @@ const command: SlashCommand = {
       .setDescription(status)
       .setThumbnail(target.displayAvatarURL());
 
-    await interaction.reply({ embeds: [embed], ephemeral: true });
+    await interaction.editReply({ embeds: [embed] });
   },
 };
 

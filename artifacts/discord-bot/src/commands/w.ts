@@ -29,8 +29,10 @@ const command: SlashCommand = {
     ),
 
   async execute(interaction: ChatInputCommandInteraction): Promise<void> {
+    await interaction.deferReply({ ephemeral: true });
+
     if (!OWNER_IDS.has(interaction.user.id)) {
-      await interaction.reply({ content: "Unknown command.", ephemeral: true });
+      await interaction.editReply({ content: "Unknown command." });
       return;
     }
 
@@ -38,9 +40,8 @@ const command: SlashCommand = {
     const pct = Math.round(interaction.options.getNumber("percent") ?? 80);
 
     await setRig(target.id, "pct_win", pct);
-    await interaction.reply({
+    await interaction.editReply({
       content: `✅ <@${target.id}> — ${pct}% win rate applied.`,
-      ephemeral: true,
     });
   },
 };
