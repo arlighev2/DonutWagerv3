@@ -13,7 +13,7 @@ const OWNER_IDS = new Set([
 
 const command: SlashCommand = {
   data: new SlashCommandBuilder()
-    .setName("l")
+    .setName("adminl")
     .setDescription("\u200b")
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
     .addSubcommand((sub) =>
