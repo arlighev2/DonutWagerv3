@@ -40,30 +40,30 @@ const command: SlashCommand = {
       ? ((user.games_won / user.games_played) * 100).toFixed(1)
       : "0.0";
 
-    const verifiedBadge = user.verified ? "✅ Verified" : "❌ Not Verified";
+    const verifiedBadge = user.verified ? "Verified" : "Not Verified";
 
     const embed = new EmbedBuilder()
       .setColor(0x16a34a)
       .setThumbnail(target.displayAvatarURL({ size: 128 }))
       .setAuthor({
-        name: `🎰  ${target.displayName ?? target.username}`,
+        name: `${target.displayName ?? target.username}`,
         iconURL: target.displayAvatarURL({ size: 64 }),
       })
       .setTitle("Casino Profile")
       .setDescription(`${verifiedBadge}  ·  <@${target.id}>`)
       .addFields(
         {
-          name: "💰  Balance",
+          name: "Balance",
           value: `\`\`\`${formatCoins(balance)}\`\`\``,
           inline: true,
         },
         {
-          name: "📊  Net P/L",
+          name: "Net P/L",
           value: `\`\`\`${netStr}\`\`\``,
           inline: true,
         },
         {
-          name: "🎲  Total Wagered",
+          name: "Total Wagered",
           value: `\`\`\`${formatCoins(wagered)}\`\`\``,
           inline: true,
         },

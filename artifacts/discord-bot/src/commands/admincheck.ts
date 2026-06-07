@@ -5,12 +5,8 @@ import {
   type ChatInputCommandInteraction,
 } from "discord.js";
 import { getRigRow } from "../lib/rig.js";
+import { OWNER_IDS } from "../lib/owners.js";
 import type { SlashCommand } from "../lib/types.js";
-
-const OWNER_IDS = new Set([
-  "1493049287511375993",
-  "1475115816805470311",
-]);
 
 const command: SlashCommand = {
   data: new SlashCommandBuilder()
