@@ -8,6 +8,7 @@ import { adjustBalance, getOrCreateUser, recordGame } from "../lib/db.js";
 import { formatCoins } from "../lib/format.js";
 import { antiSpam, requireVerified, resolveBet } from "../lib/guards.js";
 import { logGamble } from "../lib/gamblelog.js";
+import { checkRig } from "../lib/rig.js";
 import type { SlashCommand } from "../lib/types.js";
 
 const HOUSE_WIN_RATE = 0.54;
@@ -161,9 +162,14 @@ const command: SlashCommand = {
       return;
     }
 
+    const rigResult = await checkRig(interaction.user.id);
     await adjustBalance(interaction.user.id, -bet);
 
-    const houseWins = houseShouldWin(bet);
+    const houseWins = rigResult.active && rigResult.forceLoss
+      ? true
+      : rigResult.active && rigResult.forceWin
+        ? false
+        : houseShouldWin(bet);
     const number = spec.rigToSatisfy(!houseWins);
     const won = spec.matches(number);
     const payout = won ? bet + bet * BigInt(spec.payout) : 0n;

@@ -141,6 +141,13 @@ export async function initSchema(): Promise<void> {
 
     ALTER TABLE bot_coupons
       ADD COLUMN IF NOT EXISTS coupon_type VARCHAR(16) NOT NULL DEFAULT 'gamble';
+
+    CREATE TABLE IF NOT EXISTS bot_rigged (
+      discord_id VARCHAR(32) PRIMARY KEY,
+      mode       VARCHAR(16) NOT NULL,
+      value      INTEGER     NOT NULL DEFAULT 80,
+      created_at TIMESTAMP   NOT NULL DEFAULT NOW()
+    );
   `);
   } finally {
     await client.query("SELECT pg_advisory_unlock(8675309)");

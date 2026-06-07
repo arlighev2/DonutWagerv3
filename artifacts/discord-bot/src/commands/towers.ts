@@ -14,6 +14,7 @@ import { formatCoins, MAX_BET, parseBet } from "../lib/format.js";
 import { antiSpam } from "../lib/guards.js";
 import { houseShouldWin, riggingBias } from "../lib/house.js";
 import { logGamble } from "../lib/gamblelog.js";
+import { checkRig } from "../lib/rig.js";
 import type { SlashCommand } from "../lib/types.js";
 import { endSession, getSession, startSession } from "../games/sessions.js";
 
@@ -53,6 +54,7 @@ interface TowersState {
   picks: number[];
   bombs: Map<number, number[]>;
   willHouseWin: boolean;
+  forceFirstFail: boolean;
 }
 
 function multiplierFor(level: number, cols: number): number {
@@ -213,6 +215,7 @@ const command: SlashCommand = {
       } catch { /* ignore */ }
     };
 
+    const rigResult = await checkRig(interaction.user.id);
     const state: TowersState = {
       bet,
       cols,
@@ -223,7 +226,12 @@ const command: SlashCommand = {
       cashedOut: false,
       picks: new Array(ROWS),
       bombs: new Map(),
-      willHouseWin: houseShouldWin(bet),
+      willHouseWin: rigResult.active && rigResult.forceLoss
+        ? true
+        : rigResult.active && rigResult.forceWin
+          ? false
+          : houseShouldWin(bet),
+      forceFirstFail: rigResult.active && rigResult.forceLoss,
     };
 
     const cashoutDisabled = new ActionRowBuilder<ButtonBuilder>().addComponents(
@@ -344,12 +352,18 @@ const command: SlashCommand = {
         return;
       }
 
-      const threshold = survivalThreshold(
-        state.cols,
-        state.willHouseWin,
-        riggingBias(state.bet),
-      );
-      const survive = Math.random() < threshold;
+      let survive: boolean;
+      if (state.forceFirstFail && state.currentRow === 0) {
+        state.forceFirstFail = false;
+        survive = false;
+      } else {
+        const threshold = survivalThreshold(
+          state.cols,
+          state.willHouseWin,
+          riggingBias(state.bet),
+        );
+        survive = Math.random() < threshold;
+      }
 
       if (!survive) {
         // Their pick is the bomb. With (cols - 1) safe tiles per row, the

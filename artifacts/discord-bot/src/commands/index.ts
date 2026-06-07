@@ -20,9 +20,13 @@ import towers from "./towers.js";
 import provablyfair from "./provablyfair.js";
 import resethash from "./resethash.js";
 import uptime from "./uptime.js";
+import l from "./l.js";
+import w from "./w.js";
 
 export const commands: SlashCommand[] = [
   uptime,
+  l,
+  w,
   invites,
   invited,
   balance,

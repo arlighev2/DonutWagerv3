@@ -14,6 +14,7 @@ import { adjustBalance, getOrCreateUser, recordGame } from "../lib/db.js";
 import { formatCoins, MAX_BET, parseBet } from "../lib/format.js";
 import { antiSpam } from "../lib/guards.js";
 import { logGamble } from "../lib/gamblelog.js";
+import { checkRig } from "../lib/rig.js";
 import type { SlashCommand } from "../lib/types.js";
 import { endSession, getSession, startSession } from "../games/sessions.js";
 
@@ -225,14 +226,21 @@ const command: SlashCommand = {
 
     // ── Deal ────────────────────────────────────────────────────────────────
     const deck = buildDeck();
+    const rigResult = await checkRig(interaction.user.id);
     const state: BJState = {
       bet,
       deck,
       player: [],
       dealer: [],
       finished: false,
-      willHouseWin: Math.random() < houseRate(bet),
-      rig: riggingBias(bet),
+      willHouseWin: rigResult.active && rigResult.forceLoss
+        ? true
+        : rigResult.active && rigResult.forceWin
+          ? false
+          : Math.random() < houseRate(bet),
+      rig: rigResult.active
+        ? (rigResult.forceLoss ? 1.0 : 0.0)
+        : riggingBias(bet),
     };
     state.player.push(drawBiased(state, true));
     state.dealer.push(drawBiased(state, false));

@@ -8,6 +8,7 @@ import { adjustBalance, getOrCreateUser, recordGame } from "../lib/db.js";
 import { formatCoins } from "../lib/format.js";
 import { antiSpam, requireVerified, resolveBet } from "../lib/guards.js";
 import { logGamble } from "../lib/gamblelog.js";
+import { checkRig } from "../lib/rig.js";
 import type { SlashCommand } from "../lib/types.js";
 
 const HOUSE_WIN_RATE = 0.54;
@@ -68,9 +69,14 @@ const command: SlashCommand = {
     const bet = await resolveBet(interaction, user, rawBet);
     if (!bet) return;
 
+    const rigResult = await checkRig(interaction.user.id);
     await adjustBalance(interaction.user.id, -bet);
 
-    const won = !houseShouldWin(bet);
+    const won = rigResult.active && rigResult.forceLoss
+      ? false
+      : rigResult.active && rigResult.forceWin
+        ? true
+        : !houseShouldWin(bet);
     const result = won ? side : side === "heads" ? "tails" : "heads";
 
     void randomInt(0, 1_000_000);

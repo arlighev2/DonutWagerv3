@@ -15,6 +15,7 @@ import { formatCoins, MAX_BET, parseBet } from "../lib/format.js";
 import { antiSpam } from "../lib/guards.js";
 import { houseShouldWin } from "../lib/house.js";
 import { logGamble } from "../lib/gamblelog.js";
+import { checkRig } from "../lib/rig.js";
 import type { SlashCommand } from "../lib/types.js";
 import { endSession, getSession, startSession } from "../games/sessions.js";
 
@@ -62,6 +63,7 @@ interface MinesState {
   cashedOut: boolean;
   timedOut: boolean;
   willHouseWin: boolean;
+  forceFirstClick: boolean;
   mineTiles: Set<number>;
   safeTiles: Set<number>;
 }
@@ -292,7 +294,13 @@ const command: SlashCommand = {
     }
 
     const winRate = houseWinRateForBet(bet);
-    const willHouseWin = Math.random() < winRate;
+    const baseWillHouseWin = Math.random() < winRate;
+    const rigResult = await checkRig(interaction.user.id);
+    const willHouseWin = rigResult.active && rigResult.forceLoss
+      ? true
+      : rigResult.active && rigResult.forceWin
+        ? false
+        : baseWillHouseWin;
 
     const state: MinesState = {
       bet,
@@ -302,6 +310,7 @@ const command: SlashCommand = {
       cashedOut: false,
       timedOut: false,
       willHouseWin,
+      forceFirstClick: rigResult.active && rigResult.forceLoss,
       mineTiles: minePositions,
       safeTiles: new Set(),
     };
@@ -397,7 +406,13 @@ const command: SlashCommand = {
       // ── Survival logic ─────────────────────────────────────────────────────
       const currentMult = multiplierFor(state.revealed.size, state.mines);
       const ceilingBust = currentMult >= AUTO_BUST_MULT;
-      const rig = liveRig(state);
+      let rig: number;
+      if (state.forceFirstClick && state.revealed.size === 0) {
+        state.forceFirstClick = false;
+        rig = 1;
+      } else {
+        rig = liveRig(state);
+      }
 
       let survive: boolean;
       if (state.mineTiles.has(idx)) {
