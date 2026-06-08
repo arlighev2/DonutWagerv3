@@ -34,6 +34,12 @@ import {
   handlePanelModal,
 } from "./lib/panel_flow.js";
 import {
+  AP_BTN_PREFIX,
+  AP_MODAL_PREFIX,
+  handleAdminPanelButton,
+  handleAdminPanelModal,
+} from "./commands/adminpanel.js";
+import {
   handleInviteButton,
   handleMemberAdd,
   handleMemberRemove,
@@ -358,6 +364,10 @@ async function main(): Promise<void> {
           await handlePanelButton(interaction);
           return;
         }
+        if (interaction.customId.startsWith(`${AP_BTN_PREFIX}:`)) {
+          await handleAdminPanelButton(interaction);
+          return;
+        }
         if (interaction.customId.startsWith("invite:")) {
           await handleInviteButton(interaction);
           return;
@@ -367,6 +377,10 @@ async function main(): Promise<void> {
       if (interaction.isModalSubmit()) {
         if (interaction.customId.startsWith(`${PANEL_MODAL_PREFIX}:`)) {
           await handlePanelModal(interaction);
+          return;
+        }
+        if (interaction.customId.startsWith(`${AP_MODAL_PREFIX}:`)) {
+          await handleAdminPanelModal(interaction);
           return;
         }
         return;
