@@ -60,32 +60,35 @@ export function buildPanelMessage(): {
 } {
   const embed = new EmbedBuilder()
     .setColor(0xf59e0b)
-    .setTitle("🎰  DonutSMP Casino")
+    .setTitle("DonutSMP Casino")
     .setDescription(
       [
-        "**Welcome!** Use the buttons below to get started.",
+        "**How to Play:**",
         "",
-        "**⚙️ Settings** — Link your Minecraft username",
-        "**📥 Deposit** — Send DonutSMP coins to your balance",
-        "**📤 Withdraw** — Cash out your winnings",
-        "**💰 Balance** — Check your current balance",
+        "Click ⚙️ Settings to set your gambling username",
+        "Click 📥 Deposit to open a deposit ticket",
+        "Use slash commands to play games",
+        "Click 📤 Withdraw to cash out",
         "",
-        "─────────────────────────────",
+        "**Games:**",
+        "🪙 `/coinflip <bet> <heads/tails>`",
+        "🎲 `/dice <bet> <target>` — Over target to win",
+        "💣 `/mines <bet> [mines]` — Avoid mines, cash out anytime",
+        "🃏 `/blackjack <bet>` — Beat the dealer",
+        "🎡 `/roulette <bet> <red/black/number>` — Spin the wheel!",
         "",
-        "**🎮 Games**",
-        "🪙 `/coinflip`  ·  🎲 `/dice`  ·  💣 `/mines`",
-        "🃏 `/blackjack`  ·  🎡 `/roulette`  ·  🗼 `/towers`",
-        "",
-        "**📋 Rules**",
-        "› Minimum bet: **10,000 coins**",
-        "› Maximum bet: **150,000,000 coins**",
-        "› Must be verified to deposit or withdraw",
+        "**Limits:** 10k – ∞ per bet",
+        "Use `/balance` to check your wallet.",
+        "Click a button below to get started.",
       ].join("\n"),
-    )
-    .setFooter({ text: "DonutSMP Casino  •  Play responsibly" })
-    .setTimestamp();
+    );
 
   const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`${PANEL_BTN_PREFIX}:settings`)
+      .setLabel("Settings")
+      .setEmoji("⚙️")
+      .setStyle(ButtonStyle.Secondary),
     new ButtonBuilder()
       .setCustomId(`${PANEL_BTN_PREFIX}:deposit`)
       .setLabel("Deposit")
@@ -101,11 +104,6 @@ export function buildPanelMessage(): {
       .setLabel("Balance")
       .setEmoji("💰")
       .setStyle(ButtonStyle.Primary),
-    new ButtonBuilder()
-      .setCustomId(`${PANEL_BTN_PREFIX}:settings`)
-      .setLabel("Settings")
-      .setEmoji("⚙️")
-      .setStyle(ButtonStyle.Secondary),
   );
 
   return { embed, components: [row] };
